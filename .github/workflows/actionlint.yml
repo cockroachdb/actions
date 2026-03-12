@@ -1,0 +1,20 @@
+name: actionlint
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**/*.yml"
+      - ".github/workflows/**/*.yaml"
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: reviewdog/action-actionlint@v1.71.0
+        with:
+          reporter: github-pr-review
