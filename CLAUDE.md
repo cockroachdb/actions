@@ -37,3 +37,19 @@ that set up temporary git repos and validate behavior.
   with "Breaking Change: ". Try to keep change descriptions focused on user
   outcome.
 - CI runs on PRs: `test.yml` runs `./test.sh`, `actionlint.yml` lints workflow YAML files
+- Every shellcheck suppression (`disable`, `source`, etc.) must include a short
+  comment explaining why the suppression is needed. SC1091 (can't follow
+  sourced file) is disabled globally in `.shellcheckrc` since all sources use
+  dynamic `$SCRIPT_DIR` paths.
+- In test files, prefer `cd "$(dirname "${BASH_SOURCE[0]}")"` at the top and then use literal
+  relative paths for `source` (e.g., `source ../../actions_helpers.sh`). This
+  enables IDE go-to-definition via `source-path=SCRIPTDIR` in `.shellcheckrc`
+  without needing `# shellcheck source=` directives. In production scripts that
+  cannot `cd`, use `SCRIPT_DIR` with `# shellcheck source=` directives for
+  navigation.
+- `actions_helpers.sh` at the repo root provides shared helpers (`log_error`, `log_warning`,
+  `log_notice`, `set_output`, `set_output_multiline`). Scripts source it via
+  a relative path after `cd`-ing to their own directory.
+- Autosolve scripts (`assess.sh`, `implement.sh`, `jira.sh`, `shared.sh`) source their
+  own dependencies via `BASH_SOURCE`-relative paths. No caller needs to source the
+  chain — just source the script you need. Re-sourcing is idempotent.
