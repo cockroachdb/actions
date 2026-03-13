@@ -35,7 +35,7 @@ that set up temporary git repos and validate behavior.
   syntax highlighting and testability.
 - update CHANGELOG.md with each change.  If it's a breaking change, prefix
   with "Breaking Change: ". Try to keep change descriptions focused on user
-  outcome.
+  outcome. New entries go above older ones (the changelog grows upward).
 - CI runs on PRs: `test.yml` runs `./test.sh`, `actionlint.yml` lints workflow YAML files
 - Every shellcheck suppression (`disable`, `source`, etc.) must include a short
   comment explaining why the suppression is needed. SC1091 (can't follow
@@ -53,3 +53,16 @@ that set up temporary git repos and validate behavior.
 - Autosolve scripts (`assess.sh`, `implement.sh`, `jira.sh`, `shared.sh`) source their
   own dependencies via `BASH_SOURCE`-relative paths. No caller needs to source the
   chain — just source the script you need. Re-sourcing is idempotent.
+- In shell scripts, prefer long options over short flags for readability
+  (e.g., `grep --quiet --fixed-strings` instead of `grep -qF`,
+  `curl --silent --output /dev/null` instead of `curl -s -o /dev/null`).
+  Exceptions: flags with no long form (e.g., `git checkout -b`) and
+  universally understood short forms in test helpers (e.g., `rm -rf`).
+- Never redirect stderr (e.g., `2>/dev/null`, `2>&1`) in shell scripts or
+  action steps. Suppressing stderr hides real errors and makes debugging
+  harder. Let stderr flow to the output naturally. Run each command on its
+  own line so that `bash -e` (the default for GitHub Actions `run` steps)
+  halts on failure and the return code is checked automatically. Stderr
+  output is valuable for debugging — don't discard it.
+- In workflow YAML files, always use the latest major version of built-in
+  GitHub Actions (e.g., `actions/checkout@v5`, `actions/upload-artifact@v4`).

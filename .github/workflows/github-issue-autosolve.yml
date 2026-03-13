@@ -1,0 +1,389 @@
+name: GitHub Issue Autosolve
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        type: string
+        required: true
+      issue_title:
+        type: string
+        required: true
+      issue_body:
+        type: string
+        required: true
+      trigger_label:
+        type: string
+        required: false
+        default: "autosolve"
+      prompt:
+        type: string
+        required: false
+        default: ""
+      skill:
+        type: string
+        required: false
+        default: ""
+      additional_instructions:
+        type: string
+        required: false
+        default: ""
+      allowed_tools:
+        type: string
+        required: false
+        default: ""
+      model:
+        type: string
+        required: false
+        default: "claude-opus-4-6"
+      max_retries:
+        type: string
+        required: false
+        default: "3"
+      auth_mode:
+        type: string
+        required: false
+        default: "vertex"
+      vertex_project_id:
+        type: string
+        required: false
+        default: ""
+      vertex_region:
+        type: string
+        required: false
+        default: "us-east5"
+      vertex_workload_identity_provider:
+        type: string
+        required: false
+        default: ""
+      vertex_service_account:
+        type: string
+        required: false
+        default: ""
+      fork_owner:
+        type: string
+        required: true
+      fork_repo:
+        type: string
+        required: true
+      blocked_paths:
+        type: string
+        required: false
+        default: ".github/workflows/"
+      git_user_name:
+        type: string
+        required: false
+        default: "autosolve[bot]"
+      git_user_email:
+        type: string
+        required: false
+        default: "autosolve[bot]@users.noreply.github.com"
+    secrets:
+      repo_token:
+        required: true
+      fork_push_token:
+        required: true
+      pr_create_token:
+        required: true
+      anthropic_api_key:
+        required: false
+    outputs:
+      status:
+        value: ${{ jobs.solve.outputs.status }}
+      pr_url:
+        value: ${{ jobs.solve.outputs.pr_url }}
+
+concurrency:
+  group: autosolve-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  # Quick check: skip if an autosolve PR already exists for this issue.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      pr_exists: ${{ steps.check.outputs.exists }}
+      pr_url: ${{ steps.check.outputs.pr_url }}
+    steps:
+      - name: Check for existing PR
+        id: check
+        shell: bash
+        run: |
+          label="autosolve-issue-${{ inputs.issue_number }}"
+          pr_url="$(GH_TOKEN="${PR_CREATE_TOKEN}" gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --label "$label" \
+            --json url --jq '.[0].url // empty')"
+          if [ -n "$pr_url" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+            echo "::notice::An open PR already exists for issue #${{ inputs.issue_number }}: $pr_url"
+          fi
+        env:
+          PR_CREATE_TOKEN: ${{ secrets.pr_create_token }}
+
+      - name: Comment on issue
+        if: steps.check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          GH_TOKEN="${REPO_TOKEN}" gh issue comment "${{ inputs.issue_number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "Auto-solver was triggered but a PR already exists for this issue: ${{ steps.check.outputs.pr_url }}
+
+          To create a new attempt, close the existing PR and add the label again."
+        env:
+          REPO_TOKEN: ${{ secrets.repo_token }}
+
+      - name: Remove label
+        if: steps.check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          GH_TOKEN="${REPO_TOKEN}" gh issue edit "${{ inputs.issue_number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "${{ inputs.trigger_label }}" || true
+        env:
+          REPO_TOKEN: ${{ secrets.repo_token }}
+
+  solve:
+    needs: check
+    if: needs.check.outputs.pr_exists != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    outputs:
+      status: ${{ steps.final_status.outputs.status }}
+      pr_url: ${{ steps.pr.outputs.pr_url }}
+
+    # Env vars shared across all steps that call run_step.sh
+    env:
+      ACTIONS_DIR: .actions/autosolve
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Checkout cockroachdb/actions at the ref the caller used in their
+      # workflow_call uses: line. We parse the caller's workflow file to extract
+      # the ref, because github.job_workflow_sha is unreliable in reusable
+      # workflows (see https://github.com/actions/runner/issues/2417).
+      - name: Resolve actions ref
+        id: actions_ref
+        shell: bash
+        run: |
+          workflow_ref="${{ github.workflow_ref }}"
+          workflow_path="${workflow_ref#"${{ github.repository }}/"}"
+          workflow_path="${workflow_path%%@*}"
+          ref=$(grep 'cockroachdb/actions/' "$workflow_path" | grep --only-matching '@[^"'"'"' ]*' | head -1 | cut -c2-)
+          echo "Resolved actions ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v5
+        with:
+          repository: cockroachdb/actions
+          ref: ${{ steps.actions_ref.outputs.ref }}
+          path: .actions
+
+      - name: Authenticate to Google Cloud (Vertex)
+        if: inputs.auth_mode == 'vertex' && inputs.vertex_workload_identity_provider != ''
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ inputs.vertex_project_id }}
+          service_account: ${{ inputs.vertex_service_account }}
+          workload_identity_provider: ${{ inputs.vertex_workload_identity_provider }}
+
+      # --- Build prompt ---
+      - name: Build prompt
+        id: build_prompt
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh github_issues build_github_issue_prompt
+        env:
+          INPUT_PROMPT: ${{ inputs.prompt }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_BODY: ${{ inputs.issue_body }}
+
+      # --- Assess ---
+      - name: Validate inputs
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared validate_inputs
+        env:
+          INPUT_PROMPT: ${{ steps.build_prompt.outputs.prompt }}
+          INPUT_SKILL: ${{ inputs.skill }}
+
+      - name: Validate authentication
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared validate_auth
+        env:
+          ANTHROPIC_API_KEY: ${{ inputs.auth_mode == 'api_key' && secrets.anthropic_api_key || '' }}
+          CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
+          CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
+          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
+
+      - name: Install Claude CLI
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared install_claude
+        env:
+          CLAUDE_CLI_VERSION: "2.1.76"
+
+      - name: Build assessment prompt
+        id: assess_prompt
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared build_prompt
+        env:
+          INPUT_PROMPT: ${{ steps.build_prompt.outputs.prompt }}
+          INPUT_SKILL: ${{ inputs.skill }}
+          INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
+          INPUT_FOOTER_TYPE: "assessment"
+          INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+
+      - name: Run assessment
+        id: assess
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh assess run_assessment
+        env:
+          ANTHROPIC_API_KEY: ${{ inputs.auth_mode == 'api_key' && secrets.anthropic_api_key || '' }}
+          CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
+          CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
+          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
+          PROMPT_FILE: ${{ steps.assess_prompt.outputs.prompt_file }}
+          INPUT_MODEL: ${{ inputs.model }}
+
+      - name: Set assessment outputs
+        id: assess_outputs
+        if: always()
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh assess set_assess_outputs
+        env:
+          ASSESS_RESULT: ${{ steps.assess.outputs.assessment }}
+
+      # --- Comment: Skipped ---
+      - name: Comment on issue - Skipped
+        if: steps.assess.outputs.assessment == 'SKIP'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh github_issues comment_on_issue
+        env:
+          GITHUB_TOKEN_INPUT: ${{ secrets.repo_token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          COMMENT_TYPE: "skipped"
+          SUMMARY: ${{ steps.assess_outputs.outputs.summary }}
+
+      # --- Implement ---
+      - name: Build implementation prompt
+        id: impl_prompt
+        if: steps.assess.outputs.assessment == 'PROCEED'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared build_prompt
+        env:
+          INPUT_PROMPT: ${{ steps.build_prompt.outputs.prompt }}
+          INPUT_SKILL: ${{ inputs.skill }}
+          INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
+          INPUT_FOOTER_TYPE: "implementation"
+          INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+
+      - name: Run implementation
+        id: implement
+        if: steps.assess.outputs.assessment == 'PROCEED'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh implement run_implementation
+        env:
+          ANTHROPIC_API_KEY: ${{ inputs.auth_mode == 'api_key' && secrets.anthropic_api_key || '' }}
+          CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
+          CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
+          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
+          PROMPT_FILE: ${{ steps.impl_prompt.outputs.prompt_file }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
+          INPUT_MAX_RETRIES: ${{ inputs.max_retries }}
+
+      - name: Security validation
+        id: security
+        if: steps.implement.outputs.implementation == 'SUCCESS'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh implement security_check
+        env:
+          INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+
+      - name: Push and create PR
+        id: pr
+        if: >
+          steps.security.conclusion == 'success' &&
+          steps.implement.outputs.implementation == 'SUCCESS'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh implement push_and_pr
+        env:
+          INPUT_FORK_OWNER: ${{ inputs.fork_owner }}
+          INPUT_FORK_REPO: ${{ inputs.fork_repo }}
+          INPUT_FORK_PUSH_TOKEN: ${{ secrets.fork_push_token }}
+          INPUT_PR_CREATE_TOKEN: ${{ secrets.pr_create_token }}
+          INPUT_PR_LABELS: "autosolve,autosolve-issue-${{ inputs.issue_number }}"
+          INPUT_PR_DRAFT: "true"
+          INPUT_GIT_USER_NAME: ${{ inputs.git_user_name }}
+          INPUT_GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+          INPUT_BRANCH_SUFFIX: "issue-${{ inputs.issue_number }}"
+          INPUT_PROMPT: ${{ steps.build_prompt.outputs.prompt }}
+
+      - name: Set implementation outputs
+        id: impl_outputs
+        if: always()
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh implement set_implement_outputs
+        env:
+          IMPL_RESULT: ${{ steps.implement.outputs.implementation }}
+          SECURITY_CONCLUSION: ${{ steps.security.conclusion }}
+          PR_CONCLUSION: ${{ steps.pr.conclusion }}
+          INPUT_CREATE_PR: "true"
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          BRANCH_NAME: ${{ steps.pr.outputs.branch_name }}
+
+      # --- Comment: Success/Failed ---
+      - name: Comment on issue - Success
+        if: steps.impl_outputs.outputs.status == 'SUCCESS'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh github_issues comment_on_issue
+        env:
+          GITHUB_TOKEN_INPUT: ${{ secrets.repo_token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          COMMENT_TYPE: "success"
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+
+      - name: Comment on issue - Failed
+        if: steps.implement.conclusion == 'failure' || steps.impl_outputs.outputs.status == 'FAILED'
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh github_issues comment_on_issue
+        env:
+          GITHUB_TOKEN_INPUT: ${{ secrets.repo_token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          COMMENT_TYPE: "failed"
+
+      # --- Cleanup ---
+      - name: Remove label
+        if: always()
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh github_issues remove_label
+        env:
+          GITHUB_TOKEN_INPUT: ${{ secrets.repo_token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TRIGGER_LABEL: ${{ inputs.trigger_label }}
+
+      - name: Set final status
+        id: final_status
+        if: always()
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh shared set_final_status
+        env:
+          ASSESSMENT: ${{ steps.assess.outputs.assessment }}
+          IMPL_STATUS: ${{ steps.impl_outputs.outputs.status }}
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: ${{ env.ACTIONS_DIR }}/run_step.sh implement cleanup_implement
