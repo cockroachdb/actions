@@ -2,13 +2,13 @@
 # Run all tests in the repository.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd)"
 FAILED=0
 
 test_files=()
 while IFS= read -r f; do
   test_files+=("$f")
-done < <(find "$SCRIPT_DIR" -mindepth 2 -name '*_test.sh' | sort)
+done < <(find "$SCRIPT_DIR" -mindepth 1 -name '*_test.sh' | sort)
 
 if [ "${#test_files[@]}" -eq 0 ]; then
   echo "No tests found."

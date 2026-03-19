@@ -10,5 +10,11 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `autosolve/assess` action: evaluate tasks for automated resolution suitability
+  using Claude in read-only mode.
+- `autosolve/implement` action: autonomously implement solutions, validate
+  security, push to fork, and create PRs using Claude.
+- `github-issue-autosolve` reusable workflow: turnkey GitHub Issues
+  integration with issue comments and label management.
 - `autotag-from-changelog` action: tag and push from CHANGELOG.md version
   change.
