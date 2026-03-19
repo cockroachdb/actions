@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Entry point for autosolve action steps.
 #
-# Usage: run_step.sh <script> <function> [args...]
+# Composite action steps run in a fresh shell, so sourcing scripts directly
+# would leave them cd'd to the scripts/ directory instead of the workspace.
+# This wrapper solves three problems:
+#   1. Sources the target script (which cd's to its own directory for clean
+#      relative imports of shared.sh, actions_helpers.sh, etc.).
+#   2. Restores the original working directory so the function runs in the
+#      caller's workspace (where the repo checkout lives).
+#   3. Manages a shared AUTOSOLVE_TMPDIR across composite action steps
+#      (each step is a new shell process).
 #
-# Sources autosolve/scripts/<script>.sh (which sources its own deps),
-# then calls <function> from the original working directory.
+# Usage: run_step.sh <script> <function> [args...]
 #
 # Examples:
 #   run_step.sh shared   validate_inputs

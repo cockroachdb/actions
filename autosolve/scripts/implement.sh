@@ -7,21 +7,21 @@ source ../../actions_helpers.sh
 source ./shared.sh
 
 run_implementation() {
-  command -v claude >/dev/null || { log_error "claude CLI not found on PATH"; return 1; }
+  require_command claude
   local prompt_file="${PROMPT_FILE:?PROMPT_FILE must be set}"
-  local model="${INPUT_MODEL:-claude-opus-4-6}"
+  local model="${INPUT_MODEL:?INPUT_MODEL must be set}"
   local allowed_tools="${INPUT_ALLOWED_TOOLS:-Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)}"
   local max_retries="${INPUT_MAX_RETRIES:-3}"
   local output_file="$AUTOSOLVE_TMPDIR/implementation.json"
 
-  echo "Running implementation with model: $model (max retries: $max_retries)"
+  log_info "Running implementation with model: $model (max retries: $max_retries)"
 
   local attempt=1
   local session_id=""
   local implementation_status="FAILED"
 
   while [ "$attempt" -le "$max_retries" ]; do
-    echo "--- Attempt $attempt of $max_retries ---"
+    log_info "--- Attempt $attempt of $max_retries ---"
 
     local exit_code=0
     if [ "$attempt" -eq 1 ]; then
@@ -54,25 +54,40 @@ run_implementation() {
     fi
 
     local result_text
+    # extract_result returns non-zero when the marker isn't found; prevent
+    # set -e from exiting so we can handle missing results below.
     result_text="$(extract_result "$output_file" "IMPLEMENTATION_RESULT")" || true
+
+    # Log Claude's result for debuggability
+    if [ -n "$result_text" ]; then
+      log_info "Claude result (attempt $attempt):"
+      log_info "$result_text"
+    else
+      log_warning "No result text extracted from Claude output on attempt $attempt"
+      # Log raw output to help debug unexpected output formats
+      if [ -f "$output_file" ]; then
+        log_warning "Could not extract result from Claude output on attempt $attempt — check step logs for raw output"
+        log_info "$(cat "$output_file")"
+      fi
+    fi
 
     # Extract session ID for potential retry
     session_id="$(extract_session_id "$output_file")"
 
     if echo "$result_text" | grep --quiet "IMPLEMENTATION_RESULT - SUCCESS"; then
-      echo "Implementation succeeded on attempt $attempt"
+      log_notice "Implementation succeeded on attempt $attempt"
       implementation_status="SUCCESS"
       echo "$result_text" > "$AUTOSOLVE_TMPDIR/implementation_result.txt"
       break
     fi
 
-    echo "Attempt $attempt did not succeed"
+    log_warning "Attempt $attempt did not succeed"
     if [ -n "$result_text" ]; then
       echo "$result_text" > "$AUTOSOLVE_TMPDIR/implementation_result.txt"
     fi
 
     if [ "$attempt" -lt "$max_retries" ]; then
-      echo "Waiting 10 seconds before retry..."
+      log_info "Waiting 10 seconds before retry..."
       sleep 10
     fi
 
@@ -91,7 +106,7 @@ security_check() {
     BLOCKED_PATHS[$i]="$(echo "${BLOCKED_PATHS[$i]}" | xargs)"
   done
 
-  echo "Checking for modifications to blocked paths: ${BLOCKED_PATHS[*]}"
+  log_info "Checking for modifications to blocked paths: ${BLOCKED_PATHS[*]}"
 
   local violation_found=false
 
@@ -103,38 +118,32 @@ security_check() {
   local all_changed
   all_changed="$(printf '%s\n%s\n%s\n' "$unstaged" "$staged" "$untracked" | sort -u)"
 
-  for blocked in "${BLOCKED_PATHS[@]}"; do
-    [ -z "$blocked" ] && continue
-
-    # Use -F for literal prefix matching (not regex)
-    if echo "$unstaged" | grep --quiet --ignore-case --fixed-strings "$blocked"; then
-      log_error "Blocked path modified (unstaged): $blocked"
-      violation_found=true
-    fi
-
-    if echo "$untracked" | grep --quiet --ignore-case --fixed-strings "$blocked"; then
-      log_error "Blocked path has new untracked file: $blocked"
-      violation_found=true
-    fi
-
-    if echo "$staged" | grep --quiet --ignore-case --fixed-strings "$blocked"; then
-      log_error "Blocked path modified (staged): $blocked"
-      violation_found=true
-    fi
-  done
-
-  # Check for symlinks to blocked paths across all changed files
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    if [ -L "$f" ]; then
+  # Check each changed file against blocked path prefixes
+  local file
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    for blocked in "${BLOCKED_PATHS[@]}"; do
+      [ -z "$blocked" ] && continue
+      # True prefix match using shell pattern
+      case "$file" in
+        "$blocked"*)
+          log_error "Blocked path modified: $file (matches prefix $blocked)"
+          violation_found=true
+          ;;
+      esac
+    done
+    # Check symlinks pointing into blocked paths
+    if [ -L "$file" ]; then
       local target
-      target=$(readlink -f "$f")
+      target=$(readlink -f "$file")
       for blocked in "${BLOCKED_PATHS[@]}"; do
         [ -z "$blocked" ] && continue
-        if echo "$target" | grep --quiet --ignore-case --fixed-strings "/$blocked"; then
-          log_error "Symlink to blocked path: $f -> $target"
-          violation_found=true
-        fi
+        case "$target" in
+          */"$blocked"*)
+            log_error "Symlink to blocked path: $file -> $target"
+            violation_found=true
+            ;;
+        esac
       done
     fi
   done <<< "$all_changed"
@@ -145,7 +154,7 @@ security_check() {
     return 1
   fi
 
-  echo "Security check passed"
+  log_notice "Security check passed"
 }
 
 push_and_pr() {
@@ -190,10 +199,15 @@ push_and_pr() {
   local branch_name="autosolve/${branch_suffix}"
   git checkout -b "$branch_name"
 
-  # Read and remove Claude-generated metadata files before staging
-  local claude_commit_message=""
+  # Read and remove Claude-generated metadata files before staging.
+  # .autosolve-commit-message: commit message (subject + body) written by Claude.
+  # .autosolve-pr-body: full PR description written by Claude.
+  local claude_commit_subject=""
+  local claude_commit_body=""
   if [ -f ".autosolve-commit-message" ]; then
-    claude_commit_message="$(head -1 .autosolve-commit-message)"
+    claude_commit_subject="$(head -1 .autosolve-commit-message)"
+    # Body is everything after the first blank line (skip subject + blank line)
+    claude_commit_body="$(tail -n +3 .autosolve-commit-message)"
     rm -f .autosolve-commit-message
   fi
   if [ -f ".autosolve-pr-body" ]; then
@@ -213,43 +227,48 @@ push_and_pr() {
     return 1
   fi
 
-  # Build commit message — prefer pr_title, then Claude's summary, then prompt
+  # Build commit message — prefer pr_title, then Claude's subject, then prompt
   local commit_subject
   if [ -n "$pr_title" ]; then
     commit_subject="$pr_title"
-  elif [ -n "$claude_commit_message" ]; then
-    commit_subject="$claude_commit_message"
+  elif [ -n "$claude_commit_subject" ]; then
+    commit_subject="$claude_commit_subject"
   else
     commit_subject="autosolve: $(echo "${INPUT_PROMPT:-automated change}" | head -c 72)"
   fi
 
+  local commit_body="${claude_commit_body:-}"
+
   git commit --message "$(cat <<EOF
 ${commit_subject}
+$([ -n "$commit_body" ] && printf '\n%s' "$commit_body")
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 
-  # Push to fork
+  # Force push to the fork branch. --force is needed because the branch name
+  # is deterministic (autosolve/issue-N) and a previous failed run may have
+  # already pushed to it.
   git push --set-upstream fork "$branch_name" --force
 
   # Build PR body: prefer Claude-written .autosolve-pr-body, then custom
-  # template, then fall back to the commit message body.
+  # template, then fall back to a summary of all commits on the branch.
   local pr_body
   if [ -n "$pr_body_template" ]; then
     pr_body="$pr_body_template"
     # Support template variables
     local summary=""
     if [ -f "$AUTOSOLVE_TMPDIR/implementation_result.txt" ]; then
-      summary="$(sed '/^IMPLEMENTATION_RESULT/d' "$AUTOSOLVE_TMPDIR/implementation_result.txt" | head -50)"
+      summary="$(truncate_output 200 "$(sed '/^IMPLEMENTATION_RESULT/d' "$AUTOSOLVE_TMPDIR/implementation_result.txt")")"
     fi
     pr_body="${pr_body//\{\{SUMMARY\}\}/$summary}"
     pr_body="${pr_body//\{\{BRANCH\}\}/$branch_name}"
   elif [ -f "$AUTOSOLVE_TMPDIR/autosolve-pr-body" ]; then
     pr_body="$(cat "$AUTOSOLVE_TMPDIR/autosolve-pr-body")"
   else
-    # Fall back to commit message body (everything after the first line)
-    pr_body="$(git log -1 --format='%b')"
+    # Summarize all commits on the branch relative to the base
+    pr_body="$(git log "${pr_base_branch}..HEAD" --format='%B' | head -200)"
   fi
 
   # Append auto-generation notice
@@ -274,14 +293,15 @@ EOF
     draft_flag="--draft"
   fi
 
-  # Ensure all PR labels exist on the repo (gh pr create fails if they don't)
+  # Ensure all PR labels exist on the repo (gh pr create fails if they don't).
+  # Label creation is best-effort — it fails harmlessly if the label already exists.
   local label
   while IFS= read -r label; do
     label="$(echo "$label" | xargs)"
     [ -z "$label" ] && continue
     GH_TOKEN="${pr_create_token}" gh label create "$label" \
       --repo "${GITHUB_REPOSITORY:-}" \
-      --color "6f42c1" 2>&1 || true
+      --color "6f42c1" || true
   done <<< "${pr_labels//,/$'\n'}"
 
   local pr_url
@@ -292,12 +312,12 @@ EOF
     $draft_flag \
     --title "$pr_title" \
     --body "$pr_body" \
-    --label "$pr_labels" 2>&1)" || {
+    --label "$pr_labels")" || {
     log_error "Failed to create PR: $pr_url"
     return 1
   }
 
-  echo "PR created: $pr_url"
+  log_notice "PR created: $pr_url"
   set_output "pr_url" "$pr_url"
   set_output "branch_name" "$branch_name"
 }
@@ -328,7 +348,7 @@ set_implement_outputs() {
   fi
 
   local summary
-  summary="$(echo "$result_text" | sed '/^IMPLEMENTATION_RESULT/d' | head -50)"
+  summary="$(truncate_output 200 "$(echo "$result_text" | sed '/^IMPLEMENTATION_RESULT/d')")"
 
   set_output "status" "$status"
   set_output "pr_url" "$pr_url"
@@ -336,25 +356,20 @@ set_implement_outputs() {
   set_output_multiline "summary" "$summary"
   set_output_multiline "result" "$result_text"
 
-  {
-    echo "## Autosolve Implementation"
-    echo "**Status:** $status"
-    if [ -n "$pr_url" ]; then
-      echo "**PR:** $pr_url"
-    fi
-    if [ -n "$branch_name" ]; then
-      echo "**Branch:** \`$branch_name\`"
-    fi
-    if [ -n "$summary" ]; then
-      echo "### Summary"
-      echo "$summary"
-    fi
-  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  write_step_summary <<EOF
+## Autosolve Implementation
+**Status:** $status
+$([ -n "$pr_url" ] && echo "**PR:** $pr_url")
+$([ -n "$branch_name" ] && echo "**Branch:** \`$branch_name\`")
+$([ -n "$summary" ] && printf '### Summary\n%s' "$summary")
+EOF
 }
 
 cleanup_implement() {
-  # These may not exist if the step that set them was skipped; || true to avoid failing cleanup.
+  # credential.helper may not exist if the push step was skipped (e.g.,
+  # assessment returned SKIP or security check failed).
   git config --local --unset credential.helper || true
+  # fork remote may not exist if push_and_pr was never reached.
   git remote remove fork || true
   rm -rf "${AUTOSOLVE_TMPDIR:-}"
 }

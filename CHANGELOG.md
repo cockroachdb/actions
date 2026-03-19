@@ -16,7 +16,5 @@ Breaking changes are prefixed with "Breaking Change: ".
   security, push to fork, and create PRs using Claude.
 - `github-issue-autosolve` reusable workflow: turnkey GitHub Issues
   integration with issue comments and label management.
-- `jira-autosolve` reusable workflow: turnkey Jira integration composing
-  autosolve/assess + autosolve/implement with ticket comments and transitions.
 - `autotag-from-changelog` action: tag and push from CHANGELOG.md version
   change.

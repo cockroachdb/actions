@@ -63,7 +63,8 @@ task is suitable for automated resolution.
 | `result` | Full Claude result text |
 
 **`autosolve/implement`** — Runs Claude to implement a solution, validates
-changes against blocked paths, pushes to a fork, and creates a PR.
+changes against blocked paths, pushes to a fork, and creates a single-commit
+PR.
 
 ```yaml
 - uses: cockroachdb/actions/autosolve/implement@v1
@@ -84,13 +85,12 @@ changes against blocked paths, pushes to a fork, and creates a PR.
 | `allowed_tools` | *(read/write/git tools)* | Claude `--allowedTools` string |
 | `model` | `claude-opus-4-6` | Claude model ID |
 | `max_retries` | `3` | Maximum implementation attempts |
-| `timeout_minutes` | `60` | Maximum wall-clock time |
 | `create_pr` | `true` | Whether to create a PR from the changes |
 | `pr_base_branch` | *(repo default)* | Base branch for the PR |
 | `pr_labels` | `autosolve` | Comma-separated labels to apply |
 | `pr_draft` | `true` | Whether to create as a draft PR |
 | `pr_title` | *(from commit)* | PR title |
-| `pr_body_template` | *(built-in)* | Template with `{{SUMMARY}}`, `{{STATS}}`, `{{BRANCH}}` placeholders |
+| `pr_body_template` | *(built-in)* | Template with `{{SUMMARY}}`, `{{BRANCH}}` placeholders |
 | `fork_owner` | | GitHub user/org that owns the fork |
 | `fork_repo` | | Fork repository name |
 | `fork_push_token` | | PAT with push access to the fork |
@@ -109,26 +109,6 @@ changes against blocked paths, pushes to a fork, and creates a PR.
 | `branch_name` | Branch pushed to the fork |
 
 #### Reusable Workflows
-
-**Jira Autosolve** — Composes assess + implement with Jira comments and ticket
-transitions. Triggered via `workflow_call`.
-
-```yaml
-jobs:
-  solve:
-    uses: cockroachdb/actions/.github/workflows/jira-autosolve.yml@v1
-    with:
-      ticket_id: PROJ-123
-      title: ${{ needs.parse.outputs.title }}
-      description: ${{ needs.parse.outputs.description }}
-      jira_base_url: https://yourcompany.atlassian.net
-      fork_owner: my-bot
-      fork_repo: my-repo
-    secrets:
-      jira_token: ${{ secrets.JIRA_TOKEN }}
-      fork_push_token: ${{ secrets.FORK_PUSH_TOKEN }}
-      pr_create_token: ${{ secrets.PR_CREATE_TOKEN }}
-```
 
 **GitHub Issue Autosolve** — Composes assess + implement with GitHub issue
 comments and label management. Triggered via `workflow_call`.
@@ -150,8 +130,8 @@ jobs:
 
 #### Authentication
 
-**Reusable workflows** accept `auth_mode` as an input (`vertex`, `bedrock`, or
-omit for API key) and handle env var setup internally.
+**Reusable workflows** accept `auth_mode` as an input (`vertex` or omit for API
+key) and handle env var setup internally.
 
 **Direct composite action usage** requires the caller to set up auth and pass
 the env vars on each action step:
@@ -174,24 +154,7 @@ the env vars on each action step:
 ```
 
 Alternatively, set `ANTHROPIC_API_KEY` in the environment for direct API
-access, or configure Bedrock with `CLAUDE_CODE_USE_BEDROCK=1` and `AWS_REGION`.
-
-#### Caller checkout
-
-When using `workflow_dispatch`, `actions/checkout` defaults to the branch that
-triggered the workflow. This can include unrelated commits from that branch in
-the autosolve PR. Always check out the PR base branch explicitly:
-
-```yaml
-- uses: actions/checkout@v5
-  with:
-    ref: main  # checkout the PR base branch, not the trigger ref
-    fetch-depth: 0
-    persist-credentials: false  # prevent checkout's credential helper from interfering with fork push
-```
-
-The `issues: [labeled]` trigger doesn't have this problem since it always runs
-on the default branch.
+access.
 
 ## Development
 

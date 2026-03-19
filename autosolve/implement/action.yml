@@ -26,10 +26,6 @@ inputs:
     description: Maximum implementation attempts.
     required: false
     default: "3"
-  timeout_minutes:
-    description: Maximum wall-clock time for implementation.
-    required: false
-    default: "60"
   create_pr:
     description: Whether to create a PR from the changes.
     required: false
@@ -51,7 +47,7 @@ inputs:
     required: false
     default: ""
   pr_body_template:
-    description: "Template for the PR body. Supports placeholders: {{SUMMARY}}, {{STATS}}, {{BRANCH}}."
+    description: "Template for the PR body. Supports placeholders: {{SUMMARY}}, {{BRANCH}}."
     required: false
     default: ""
   fork_owner:
@@ -89,7 +85,7 @@ inputs:
   claude_cli_version:
     description: Claude CLI version to install.
     required: false
-    default: "2.1.76"
+    default: "2.1.79"
 
 outputs:
   status:

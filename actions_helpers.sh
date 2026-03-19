@@ -5,6 +5,9 @@
 log_error()   { echo "::error::$*"; }
 log_warning() { echo "::warning::$*"; }
 log_notice()  { echo "::notice::$*"; }
+# Plain informational output — no GitHub annotation, just step log output.
+# Use for multi-line diagnostic data where ::notice:: would be inappropriate.
+log_info()    { echo "$*"; }
 
 # Write a single-line output: set_output key value
 set_output() {

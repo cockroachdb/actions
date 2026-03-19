@@ -42,17 +42,7 @@ validate_auth() {
     return 0
   fi
 
-  if [ "${CLAUDE_CODE_USE_BEDROCK:-}" = "1" ]; then
-    local missing=()
-    [ -z "${AWS_REGION:-}" ] && missing+=("AWS_REGION")
-    if [ "${#missing[@]}" -gt 0 ]; then
-      log_error "Bedrock auth requires: ${missing[*]}"
-      return 1
-    fi
-    return 0
-  fi
-
-  log_error "No Claude authentication configured. Set ANTHROPIC_API_KEY, or enable Vertex AI (CLAUDE_CODE_USE_VERTEX=1) or Bedrock (CLAUDE_CODE_USE_BEDROCK=1)."
+  log_error "No Claude authentication configured. Set ANTHROPIC_API_KEY or enable Vertex AI (CLAUDE_CODE_USE_VERTEX=1)."
   return 1
 }
 
@@ -60,15 +50,15 @@ install_claude() {
   if command -v claude >/dev/null; then
     local installed_version
     installed_version="$(claude --version)"
-    echo "Claude CLI already installed: $installed_version"
+    log_info "Claude CLI already installed: $installed_version"
     return 0
   fi
   local version="${CLAUDE_CLI_VERSION:?CLAUDE_CLI_VERSION must be set}"
-  echo "Installing Claude CLI v${version}..."
-  curl --fail --silent --show-error --location https://claude.ai/install.sh | bash -s -- "$version"
+  log_info "Installing Claude CLI v${version} via npm..."
+  npm install --global "@anthropic-ai/claude-code@${version}"
   local installed_version
   installed_version="$(claude --version)"
-  echo "Claude CLI installed: $installed_version"
+  log_info "Claude CLI installed: $installed_version"
 }
 
 build_prompt() {
@@ -119,10 +109,13 @@ build_prompt() {
       criteria="$INPUT_ASSESSMENT_CRITERIA"
     else
       criteria="$(cat <<'CRITERIA'
-- PROCEED if: the task is clear, affects a bounded set of files, and does
-  not require architectural decisions or human judgment on product direction.
+- PROCEED if: the task is clear, affects a bounded set of files, can be
+  delivered as a single commit, and does not require architectural decisions
+  or human judgment on product direction.
 - SKIP if: the task is ambiguous, requires design decisions or RFC, affects
-  many unrelated components, or requires human judgment.
+  many unrelated components, requires human judgment, or would benefit from
+  being split into multiple commits (e.g., separate refactoring from
+  behavioral changes, or independent fixes across unrelated subsystems).
 CRITERIA
 )"
     fi
@@ -148,6 +141,8 @@ extract_result() {
   fi
 
   local result_text
+  # jq returns non-zero when the select filter matches nothing (e.g., if the
+  # JSON is truncated or has an unexpected schema). We handle empty results below.
   result_text="$(jq --raw-output 'select(.type == "result") | .result' "$json_file")" || true
 
   if [ -z "$result_text" ]; then
@@ -168,6 +163,8 @@ extract_result() {
 
 extract_session_id() {
   local json_file="$1"
+  # jq returns non-zero when the select filter matches nothing; return empty
+  # string instead of failing so callers can check for a missing session ID.
   jq --raw-output 'select(.type == "result") | .session_id' "$json_file" || true
 }
 

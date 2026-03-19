@@ -2,7 +2,6 @@
 # Tests for assess.sh functions.
 # shellcheck disable=SC2034  # Variables are read by sourced functions
 set -euo pipefail
-trap 'echo "Error occurred at line $LINENO"; exit 1' ERR
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ../../test_helpers.sh
@@ -23,7 +22,7 @@ test_outputs_proceed() {
   printf 'The task is clear and bounded.\nASSESSMENT_RESULT - PROCEED\n' > "$AUTOSOLVE_TMPDIR/assessment_result.txt"
   ASSESS_RESULT=PROCEED
   set_assess_outputs
-  grep -q 'assessment=PROCEED' "$GITHUB_OUTPUT"
+  check_contains 'assessment=PROCEED' "$GITHUB_OUTPUT"
 }
 expect_success "set_assess_outputs: PROCEED" test_outputs_proceed
 
@@ -33,7 +32,7 @@ test_outputs_skip() {
   printf 'Too ambiguous for automation.\nASSESSMENT_RESULT - SKIP\n' > "$AUTOSOLVE_TMPDIR/assessment_result.txt"
   ASSESS_RESULT=SKIP
   set_assess_outputs
-  grep -q 'assessment=SKIP' "$GITHUB_OUTPUT"
+  check_contains 'assessment=SKIP' "$GITHUB_OUTPUT"
 }
 expect_success "set_assess_outputs: SKIP" test_outputs_skip
 
@@ -46,7 +45,7 @@ test_outputs_summary_strips_marker() {
   # Extract just the summary block (between summary<<DELIM and DELIM) and verify marker is absent
   local summary
   summary=$(sed -n '/^summary<</,/^GHEOF_/p' "$GITHUB_OUTPUT")
-  echo "$summary" | grep -q 'This is the reasoning' && ! echo "$summary" | grep -q 'ASSESSMENT_RESULT'
+  echo "$summary" | check_contains 'This is the reasoning' && ! echo "$summary" | check_contains 'ASSESSMENT_RESULT'
 }
 expect_success "set_assess_outputs: summary strips marker" test_outputs_summary_strips_marker
 
@@ -56,8 +55,8 @@ test_outputs_no_result_file() {
   rm -f "$AUTOSOLVE_TMPDIR/assessment_result.txt"
   ASSESS_RESULT=ERROR
   set_assess_outputs
-  grep -q 'assessment=ERROR' "$GITHUB_OUTPUT"
+  check_contains 'assessment=ERROR' "$GITHUB_OUTPUT"
 }
-expect_success "set_assess_outputs: no result file" test_outputs_no_result_file
+expect_success "set_assess_outputs: no result file results in ERROR" test_outputs_no_result_file
 
 print_results

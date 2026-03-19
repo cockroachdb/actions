@@ -74,5 +74,7 @@ remove_label() {
   local issue_number="${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
   local trigger_label="${TRIGGER_LABEL:-autosolve}"
 
+  # Best-effort: the label may already have been removed by another workflow
+  # run or by the user. Failure here should not fail the overall workflow.
   GH_TOKEN="$github_token" gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$trigger_label" || true
 }

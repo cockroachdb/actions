@@ -77,6 +77,10 @@ on:
         type: string
         required: false
         default: "autosolve[bot]@users.noreply.github.com"
+      timeout_minutes:
+        type: number
+        required: false
+        default: 20
     secrets:
       repo_token:
         required: true
@@ -148,7 +152,7 @@ jobs:
     needs: check
     if: needs.check.outputs.pr_exists != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: read
       issues: write
@@ -165,6 +169,8 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          # Prevent the checkout credential helper from overriding the
+          # fork_push_token used later for git push to the fork.
           persist-credentials: false
 
       # Checkout cockroachdb/actions at the ref the caller used in their
@@ -224,13 +230,12 @@ jobs:
           CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
           CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
-          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
 
       - name: Install Claude CLI
         shell: bash
         run: ${{ env.ACTIONS_DIR }}/run_step.sh shared install_claude
         env:
-          CLAUDE_CLI_VERSION: "2.1.76"
+          CLAUDE_CLI_VERSION: "2.1.79"
 
       - name: Build assessment prompt
         id: assess_prompt
@@ -252,7 +257,6 @@ jobs:
           CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
           CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
-          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
           PROMPT_FILE: ${{ steps.assess_prompt.outputs.prompt_file }}
           INPUT_MODEL: ${{ inputs.model }}
 
@@ -298,7 +302,6 @@ jobs:
           CLAUDE_CODE_USE_VERTEX: ${{ inputs.auth_mode == 'vertex' && '1' || '' }}
           ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_project_id || '' }}
           CLOUD_ML_REGION: ${{ inputs.auth_mode == 'vertex' && inputs.vertex_region || '' }}
-          CLAUDE_CODE_USE_BEDROCK: ${{ inputs.auth_mode == 'bedrock' && '1' || '' }}
           PROMPT_FILE: ${{ steps.impl_prompt.outputs.prompt_file }}
           INPUT_MODEL: ${{ inputs.model }}
           INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}

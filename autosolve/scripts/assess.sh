@@ -7,12 +7,12 @@ source ../../actions_helpers.sh
 source ./shared.sh
 
 run_assessment() {
-  command -v claude >/dev/null || { log_error "claude CLI not found on PATH"; return 1; }
+  require_command claude
   local prompt_file="${PROMPT_FILE:?PROMPT_FILE must be set}"
-  local model="${INPUT_MODEL:-claude-opus-4-6}"
+  local model="${INPUT_MODEL:?INPUT_MODEL must be set}"
   local output_file="$AUTOSOLVE_TMPDIR/assessment.json"
 
-  echo "Running assessment with model: $model"
+  log_info "Running assessment with model: $model"
 
   local exit_code=0
   claude --print \
@@ -27,6 +27,8 @@ run_assessment() {
   fi
 
   local result_text
+  # extract_result returns non-zero when the marker isn't found; prevent
+  # set -e from exiting so we can handle missing results below.
   result_text="$(extract_result "$output_file" "ASSESSMENT_RESULT")" || true
 
   if [ -z "$result_text" ]; then
@@ -35,11 +37,14 @@ run_assessment() {
     return 1
   fi
 
+  # Log the full assessment result so it appears in the action run logs.
+  log_info "$result_text"
+
   if echo "$result_text" | grep --quiet "ASSESSMENT_RESULT - PROCEED"; then
-    echo "Assessment: PROCEED"
+    log_notice "Assessment: PROCEED"
     set_output "assessment" "PROCEED"
   elif echo "$result_text" | grep --quiet "ASSESSMENT_RESULT - SKIP"; then
-    echo "Assessment: SKIP"
+    log_notice "Assessment: SKIP"
     set_output "assessment" "SKIP"
   else
     log_error "Assessment result did not contain a valid PROCEED or SKIP marker"
@@ -60,18 +65,15 @@ set_assess_outputs() {
 
   # Extract summary: everything before the ASSESSMENT_RESULT line
   local summary
-  summary="$(echo "$result_text" | sed '/^ASSESSMENT_RESULT/d' | head -50)"
+  summary="$(truncate_output 200 "$(echo "$result_text" | sed '/^ASSESSMENT_RESULT/d')")"
 
   set_output "assessment" "$assessment"
   set_output_multiline "summary" "$summary"
   set_output_multiline "result" "$result_text"
 
-  {
-    echo "## Autosolve Assessment"
-    echo "**Result:** $assessment"
-    if [ -n "$summary" ]; then
-      echo "### Summary"
-      echo "$summary"
-    fi
-  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  write_step_summary <<EOF
+## Autosolve Assessment
+**Result:** $assessment
+$([ -n "$summary" ] && printf '### Summary\n%s' "$summary")
+EOF
 }
