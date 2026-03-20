@@ -1,6 +1,12 @@
 name: Autosolve Implement
 description: Run Claude to implement a solution, validate changes, push to a fork, and create a PR.
 
+# Prerequisites:
+#   The calling workflow must install the Claude CLI BEFORE authenticating
+#   to any cloud provider.  npm post-install scripts run with the job's
+#   full environment, so installing after auth would expose credentials
+#   (e.g. the OIDC bearer token in gha-creds-*.json) to arbitrary code.
+
 inputs:
   prompt:
     description: The task for Claude to implement.
@@ -17,7 +23,7 @@ inputs:
   allowed_tools:
     description: Claude --allowedTools string.
     required: false
-    default: "Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+    default: "Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(make:*)"
   model:
     description: Claude model ID.
     required: false
@@ -82,11 +88,6 @@ inputs:
     description: Suffix for branch name (autosolve/<suffix>). Defaults to timestamp.
     required: false
     default: ""
-  claude_cli_version:
-    description: Claude CLI version to install.
-    required: false
-    default: "2.1.79"
-
 outputs:
   status:
     description: SUCCESS or FAILED
@@ -122,12 +123,6 @@ runs:
     - name: Validate authentication
       shell: bash
       run: ${{ github.action_path }}/../run_step.sh shared validate_auth
-
-    - name: Install Claude CLI
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared install_claude
-      env:
-        CLAUDE_CLI_VERSION: ${{ inputs.claude_cli_version }}
 
     - name: Build prompt
       id: prompt

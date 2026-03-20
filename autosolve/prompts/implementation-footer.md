@@ -23,6 +23,10 @@ Implement the task described above.
 7. Stage all your changes with `git add`. Do not commit — the action
    handles committing. All changes will be squashed into a single commit,
    so organize your work accordingly.
+   IMPORTANT: NEVER stage credential files, secret keys, or tokens.
+   Do NOT stage files matching: gha-creds-*.json, *.pem, *.key, *.p12,
+   credentials.json, service-account*.json, or .env files. If you see
+   these files in the working tree, leave them unstaged.
 8. Write a commit message and save it to `.autosolve-commit-message` in
    the repo root. Use standard git format: a subject line (under 72
    characters, imperative mood), a blank line, then a body explaining
