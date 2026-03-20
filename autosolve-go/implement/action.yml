@@ -1,0 +1,140 @@
+name: Autosolve Implement (Go)
+description: Run Claude to implement a solution, validate changes, push to a fork, and create a PR.
+
+# Prerequisites:
+#   The calling workflow must install the Claude CLI BEFORE authenticating
+#   to any cloud provider.  npm post-install scripts run with the job's
+#   full environment, so installing after auth would expose credentials
+#   (e.g. the OIDC bearer token in gha-creds-*.json) to arbitrary code.
+
+inputs:
+  prompt:
+    description: The task for Claude to implement.
+    required: false
+    default: ""
+  skill:
+    description: Path to a skill/prompt file relative to the repo root.
+    required: false
+    default: ""
+  additional_instructions:
+    description: Extra instructions appended after the task prompt.
+    required: false
+    default: ""
+  allowed_tools:
+    description: Claude --allowedTools string.
+    required: false
+    default: "Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(make:*)"
+  model:
+    description: Claude model ID.
+    required: false
+    default: "claude-opus-4-6"
+  max_retries:
+    description: Maximum implementation attempts.
+    required: false
+    default: "3"
+  create_pr:
+    description: Whether to create a PR from the changes.
+    required: false
+    default: "true"
+  pr_base_branch:
+    description: Base branch for the PR. Defaults to repository default branch.
+    required: false
+    default: ""
+  pr_labels:
+    description: Comma-separated labels to apply to the PR.
+    required: false
+    default: "autosolve"
+  pr_draft:
+    description: Whether to create the PR as a draft.
+    required: false
+    default: "true"
+  pr_title:
+    description: PR title. If empty, derived from first commit subject line.
+    required: false
+    default: ""
+  pr_body_template:
+    description: "Template for the PR body. Supports placeholders: {{SUMMARY}}, {{BRANCH}}."
+    required: false
+    default: ""
+  fork_owner:
+    description: GitHub username or org that owns the fork.
+    required: false
+    default: ""
+  fork_repo:
+    description: Repository name of the fork.
+    required: false
+    default: ""
+  fork_push_token:
+    description: PAT with push access to the fork.
+    required: false
+    default: ""
+  pr_create_token:
+    description: PAT with permission to create PRs on the upstream repo.
+    required: false
+    default: ""
+  blocked_paths:
+    description: "Comma-separated path prefixes that cannot be modified. WARNING: overriding removes .github/workflows/ default."
+    required: false
+    default: ".github/workflows/"
+  git_user_name:
+    description: Git author/committer name.
+    required: false
+    default: "autosolve[bot]"
+  git_user_email:
+    description: Git author/committer email.
+    required: false
+    default: "autosolve[bot]@users.noreply.github.com"
+  branch_suffix:
+    description: Suffix for branch name (autosolve/<suffix>). Defaults to timestamp.
+    required: false
+    default: ""
+
+outputs:
+  status:
+    description: SUCCESS or FAILED
+    value: ${{ steps.implement.outputs.status }}
+  pr_url:
+    description: URL of the created PR.
+    value: ${{ steps.implement.outputs.pr_url }}
+  summary:
+    description: Human-readable summary.
+    value: ${{ steps.implement.outputs.summary }}
+  result:
+    description: Full Claude result text.
+    value: ${{ steps.implement.outputs.result }}
+  branch_name:
+    description: Name of the branch pushed to the fork.
+    value: ${{ steps.implement.outputs.branch_name }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build autosolve
+      shell: bash
+      run: cd "${{ github.action_path }}/.." && go build -o /tmp/autosolve ./cmd/autosolve
+
+    - name: Run implementation
+      id: implement
+      shell: bash
+      run: /tmp/autosolve implement
+      env:
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_SKILL: ${{ inputs.skill }}
+        INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
+        INPUT_MAX_RETRIES: ${{ inputs.max_retries }}
+        INPUT_CREATE_PR: ${{ inputs.create_pr }}
+        INPUT_PR_BASE_BRANCH: ${{ inputs.pr_base_branch }}
+        INPUT_PR_LABELS: ${{ inputs.pr_labels }}
+        INPUT_PR_DRAFT: ${{ inputs.pr_draft }}
+        INPUT_PR_TITLE: ${{ inputs.pr_title }}
+        INPUT_PR_BODY_TEMPLATE: ${{ inputs.pr_body_template }}
+        INPUT_FORK_OWNER: ${{ inputs.fork_owner }}
+        INPUT_FORK_REPO: ${{ inputs.fork_repo }}
+        INPUT_FORK_PUSH_TOKEN: ${{ inputs.fork_push_token }}
+        INPUT_PR_CREATE_TOKEN: ${{ inputs.pr_create_token }}
+        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+        INPUT_GIT_USER_NAME: ${{ inputs.git_user_name }}
+        INPUT_GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+        INPUT_BRANCH_SUFFIX: ${{ inputs.branch_suffix }}
