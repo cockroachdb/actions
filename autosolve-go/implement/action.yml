@@ -1,4 +1,4 @@
-name: Autosolve Implement
+name: Autosolve Implement (Go)
 description: Run Claude to implement a solution, validate changes, push to a fork, and create a PR.
 
 # Prerequisites:
@@ -88,108 +88,53 @@ inputs:
     description: Suffix for branch name (autosolve/<suffix>). Defaults to timestamp.
     required: false
     default: ""
+
 outputs:
   status:
     description: SUCCESS or FAILED
-    value: ${{ steps.outputs.outputs.status }}
+    value: ${{ steps.implement.outputs.status }}
   pr_url:
     description: URL of the created PR.
-    value: ${{ steps.outputs.outputs.pr_url }}
+    value: ${{ steps.implement.outputs.pr_url }}
   summary:
     description: Human-readable summary.
-    value: ${{ steps.outputs.outputs.summary }}
+    value: ${{ steps.implement.outputs.summary }}
   result:
     description: Full Claude result text.
-    value: ${{ steps.outputs.outputs.result }}
+    value: ${{ steps.implement.outputs.result }}
   branch_name:
     description: Name of the branch pushed to the fork.
-    value: ${{ steps.outputs.outputs.branch_name }}
+    value: ${{ steps.implement.outputs.branch_name }}
 
 runs:
   using: "composite"
   steps:
-    - name: Validate inputs
+    - name: Build autosolve
       shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared validate_inputs
-      env:
-        INPUT_PROMPT: ${{ inputs.prompt }}
-        INPUT_SKILL: ${{ inputs.skill }}
-        INPUT_CREATE_PR: ${{ inputs.create_pr }}
-        INPUT_FORK_OWNER: ${{ inputs.fork_owner }}
-        INPUT_FORK_REPO: ${{ inputs.fork_repo }}
-        INPUT_FORK_PUSH_TOKEN: ${{ inputs.fork_push_token }}
-        INPUT_PR_CREATE_TOKEN: ${{ inputs.pr_create_token }}
-
-    - name: Validate authentication
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared validate_auth
-
-    - name: Build prompt
-      id: prompt
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared build_prompt
-      env:
-        INPUT_PROMPT: ${{ inputs.prompt }}
-        INPUT_SKILL: ${{ inputs.skill }}
-        INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
-        INPUT_FOOTER_TYPE: "implementation"
-        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+      run: cd "${{ github.action_path }}/.." && go build -o /tmp/autosolve ./cmd/autosolve
 
     - name: Run implementation
       id: implement
       shell: bash
-      run: ${{ github.action_path }}/../run_step.sh implement run_implementation
+      run: /tmp/autosolve implement
       env:
-        PROMPT_FILE: ${{ steps.prompt.outputs.prompt_file }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_SKILL: ${{ inputs.skill }}
+        INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
         INPUT_MODEL: ${{ inputs.model }}
         INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
         INPUT_MAX_RETRIES: ${{ inputs.max_retries }}
-
-    - name: Security validation
-      id: security
-      if: steps.implement.outputs.implementation == 'SUCCESS'
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh implement security_check
-      env:
-        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
-
-    - name: Push and create PR
-      id: pr
-      if: >
-        inputs.create_pr == 'true' &&
-        steps.security.conclusion == 'success' &&
-        steps.implement.outputs.implementation == 'SUCCESS'
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh implement push_and_pr
-      env:
-        INPUT_FORK_OWNER: ${{ inputs.fork_owner }}
-        INPUT_FORK_REPO: ${{ inputs.fork_repo }}
-        INPUT_FORK_PUSH_TOKEN: ${{ inputs.fork_push_token }}
-        INPUT_PR_CREATE_TOKEN: ${{ inputs.pr_create_token }}
+        INPUT_CREATE_PR: ${{ inputs.create_pr }}
         INPUT_PR_BASE_BRANCH: ${{ inputs.pr_base_branch }}
         INPUT_PR_LABELS: ${{ inputs.pr_labels }}
         INPUT_PR_DRAFT: ${{ inputs.pr_draft }}
         INPUT_PR_TITLE: ${{ inputs.pr_title }}
         INPUT_PR_BODY_TEMPLATE: ${{ inputs.pr_body_template }}
+        INPUT_FORK_OWNER: ${{ inputs.fork_owner }}
+        INPUT_FORK_REPO: ${{ inputs.fork_repo }}
+        INPUT_FORK_PUSH_TOKEN: ${{ inputs.fork_push_token }}
+        INPUT_PR_CREATE_TOKEN: ${{ inputs.pr_create_token }}
+        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
         INPUT_GIT_USER_NAME: ${{ inputs.git_user_name }}
         INPUT_GIT_USER_EMAIL: ${{ inputs.git_user_email }}
         INPUT_BRANCH_SUFFIX: ${{ inputs.branch_suffix }}
-        INPUT_PROMPT: ${{ inputs.prompt }}
-
-    - name: Set outputs
-      id: outputs
-      if: always()
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh implement set_implement_outputs
-      env:
-        IMPL_RESULT: ${{ steps.implement.outputs.implementation }}
-        SECURITY_CONCLUSION: ${{ steps.security.conclusion }}
-        PR_CONCLUSION: ${{ steps.pr.conclusion }}
-        INPUT_CREATE_PR: ${{ inputs.create_pr }}
-        PR_URL: ${{ steps.pr.outputs.pr_url }}
-        BRANCH_NAME: ${{ steps.pr.outputs.branch_name }}
-
-    - name: Cleanup
-      if: always()
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh implement cleanup_implement

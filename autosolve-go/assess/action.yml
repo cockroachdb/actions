@@ -1,4 +1,4 @@
-name: Autosolve Assess
+name: Autosolve Assess (Go)
 description: Run Claude in read-only mode to assess whether a task is suitable for automated resolution.
 
 # Prerequisites:
@@ -32,60 +32,33 @@ inputs:
     description: Comma-separated path prefixes that cannot be modified (injected into security preamble).
     required: false
     default: ".github/workflows/"
+
 outputs:
   assessment:
     description: PROCEED or SKIP
-    value: ${{ steps.outputs.outputs.assessment }}
+    value: ${{ steps.assess.outputs.assessment }}
   summary:
     description: Human-readable assessment reasoning.
-    value: ${{ steps.outputs.outputs.summary }}
+    value: ${{ steps.assess.outputs.summary }}
   result:
     description: Full Claude result text.
-    value: ${{ steps.outputs.outputs.result }}
+    value: ${{ steps.assess.outputs.result }}
 
 runs:
   using: "composite"
   steps:
-    - name: Validate inputs
+    - name: Build autosolve
       shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared validate_inputs
-      env:
-        INPUT_PROMPT: ${{ inputs.prompt }}
-        INPUT_SKILL: ${{ inputs.skill }}
-
-    - name: Validate authentication
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared validate_auth
-
-    - name: Build prompt
-      id: prompt
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh shared build_prompt
-      env:
-        INPUT_PROMPT: ${{ inputs.prompt }}
-        INPUT_SKILL: ${{ inputs.skill }}
-        INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
-        INPUT_FOOTER_TYPE: "assessment"
-        INPUT_ASSESSMENT_CRITERIA: ${{ inputs.assessment_criteria }}
-        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
+      run: cd "${{ github.action_path }}/.." && go build -o /tmp/autosolve ./cmd/autosolve
 
     - name: Run assessment
       id: assess
       shell: bash
-      run: ${{ github.action_path }}/../run_step.sh assess run_assessment
+      run: /tmp/autosolve assess
       env:
-        PROMPT_FILE: ${{ steps.prompt.outputs.prompt_file }}
+        INPUT_PROMPT: ${{ inputs.prompt }}
+        INPUT_SKILL: ${{ inputs.skill }}
+        INPUT_ADDITIONAL_INSTRUCTIONS: ${{ inputs.additional_instructions }}
+        INPUT_ASSESSMENT_CRITERIA: ${{ inputs.assessment_criteria }}
         INPUT_MODEL: ${{ inputs.model }}
-
-    - name: Set outputs
-      id: outputs
-      if: always()
-      shell: bash
-      run: ${{ github.action_path }}/../run_step.sh assess set_assess_outputs
-      env:
-        ASSESS_RESULT: ${{ steps.assess.outputs.assessment }}
-
-    - name: Cleanup
-      if: always()
-      shell: bash
-      run: rm -rf "${AUTOSOLVE_TMPDIR:-}"
+        INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}

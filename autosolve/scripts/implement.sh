@@ -10,9 +10,15 @@ run_implementation() {
   require_command claude
   local prompt_file="${PROMPT_FILE:?PROMPT_FILE must be set}"
   local model="${INPUT_MODEL:?INPUT_MODEL must be set}"
-  local allowed_tools="${INPUT_ALLOWED_TOOLS:-Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)}"
+  local allowed_tools="${INPUT_ALLOWED_TOOLS:-Read,Write,Edit,Grep,Glob,Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(go build:*),Bash(go test:*),Bash(go vet:*),Bash(make:*)}"
   local max_retries="${INPUT_MAX_RETRIES:-3}"
   local output_file="$AUTOSOLVE_TMPDIR/implementation.json"
+
+  # Ensure we're on the default branch so the PR diff is clean.
+  ensure_default_branch
+
+  # Warn if repo is missing recommended .gitignore patterns
+  check_security_gitignore
 
   log_info "Running implementation with model: $model (max retries: $max_retries)"
 
@@ -97,6 +103,126 @@ run_implementation() {
   set_output "implementation" "$implementation_status"
 }
 
+ai_security_review() {
+  log_info "Running AI security review on staged changes..."
+
+  local diff
+  diff="$(git diff --cached)" || { log_warning "Could not get staged diff, skipping AI review"; return 0; }
+  [ -z "$diff" ] && return 0
+
+  # Truncate very large diffs
+  if [ "${#diff}" -gt 100000 ]; then
+    diff="${diff:0:100000}
+... (truncated)"
+  fi
+
+  local prompt_file="$AUTOSOLVE_TMPDIR/security_review_prompt.txt"
+  local output_file="$AUTOSOLVE_TMPDIR/security_review.json"
+
+  cat > "$prompt_file" <<SECEOF
+You are a security reviewer. Your ONLY task is to review the following
+git diff for sensitive content that should NOT be committed to a repository.
+
+Look for:
+- Credentials, API keys, tokens, passwords (hardcoded or in config)
+- Private keys, certificates, keystores
+- Cloud provider credential files (e.g., gha-creds-*.json, service account keys)
+- .env files or environment variable files containing secrets
+- Database connection strings with embedded passwords
+- Any other secrets or sensitive data
+
+Here is the staged diff:
+
+${diff}
+
+**OUTPUT REQUIREMENT**: End your response with exactly one of:
+SECURITY_REVIEW - SUCCESS (if no sensitive content found)
+SECURITY_REVIEW - FAILED (if any sensitive content found)
+
+If you find sensitive content, list each finding before the FAIL marker.
+SECEOF
+
+  local exit_code=0
+  claude --print \
+    --model haiku \
+    --output-format json \
+    --max-turns 1 \
+    < "$prompt_file" > "$output_file" 2>/dev/null || exit_code=$?
+
+  if [ "$exit_code" -ne 0 ]; then
+    log_warning "AI security review failed to run, skipping"
+    return 0
+  fi
+
+  local result_text
+  result_text="$(jq -r 'select(.type == "result") | .result // empty' "$output_file" 2>/dev/null || true)"
+
+  if [ -z "$result_text" ]; then
+    log_warning "AI security review did not produce a result, skipping"
+    return 0
+  fi
+
+  if echo "$result_text" | grep --quiet --fixed-strings "SECURITY_REVIEW - FAIL"; then
+    log_error "AI security review found sensitive content:"
+    log_error "$result_text"
+    git reset HEAD
+    return 1
+  fi
+
+  log_notice "AI security review passed"
+}
+
+ensure_default_branch() {
+  local default_branch=""
+
+  # Try git symbolic-ref first
+  local default_ref
+  if default_ref="$(git symbolic-ref refs/remotes/origin/HEAD 2>&1)"; then
+    default_branch="${default_ref#refs/remotes/origin/}"
+  else
+    # Fall back to GitHub API
+    log_info "refs/remotes/origin/HEAD not set, querying GitHub API for default branch"
+    local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+    if default_branch="$(gh repo view "$repo" --json defaultBranchRef --jq '.defaultBranchRef.name' 2>&1)"; then
+      : # success
+    else
+      log_warning "Could not determine default branch: git symbolic-ref failed and GitHub API failed ($default_branch)"
+      return 1
+    fi
+  fi
+
+  local current_ref
+  if ! current_ref="$(git symbolic-ref HEAD 2>&1)"; then
+    log_warning "HEAD is detached, cannot determine current branch"
+    return 0
+  fi
+  local current_branch="${current_ref#refs/heads/}"
+
+  if [ "$current_branch" != "$default_branch" ]; then
+    log_info "Switching from $current_branch to default branch $default_branch"
+    git checkout "$default_branch"
+  fi
+}
+
+# Warn if the repo's .gitignore is missing recommended credential exclusion
+# patterns. Does not modify the file — repo owners should add them.
+check_security_gitignore() {
+  local patterns="gha-creds-*.json *.pem *.key *.p12 *.pfx *.keystore credentials.json service-account*.json"
+  if [ ! -f .gitignore ]; then
+    log_warning "No .gitignore found. For defense-in-depth, add one with credential exclusion patterns: $patterns"
+    return 0
+  fi
+  local missing=""
+  for p in $patterns; do
+    if ! grep --quiet --fixed-strings "$p" .gitignore; then
+      missing="$missing $p"
+    fi
+  done
+  if [ -n "$missing" ]; then
+    log_warning "Repo .gitignore is missing recommended credential exclusion patterns:$missing"
+  fi
+}
+
 security_check() {
   local blocked_paths="${INPUT_BLOCKED_PATHS:-.github/workflows/}"
 
@@ -118,7 +244,7 @@ security_check() {
   local all_changed
   all_changed="$(printf '%s\n%s\n%s\n' "$unstaged" "$staged" "$untracked" | sort -u)"
 
-  # Check each changed file against blocked path prefixes
+  # Check each changed file against blocked path prefixes and sensitive patterns
   local file
   while IFS= read -r file; do
     [ -z "$file" ] && continue
@@ -132,6 +258,23 @@ security_check() {
           ;;
       esac
     done
+    # Check for sensitive files (credentials, keys, secrets)
+    local basename
+    basename="$(basename "$file")"
+    local lower_basename
+    lower_basename="$(echo "$basename" | tr '[:upper:]' '[:lower:]')"
+    case "$lower_basename" in
+      gha-creds-*|credentials.json|service-account*|.env|.env.*)
+        log_error "Sensitive file detected: $file"
+        violation_found=true
+        ;;
+    esac
+    case "$file" in
+      *.pem|*.key|*.p12|*.pfx|*.keystore)
+        log_error "Sensitive file detected: $file (sensitive extension)"
+        violation_found=true
+        ;;
+    esac
     # Check symlinks pointing into blocked paths
     if [ -L "$file" ]; then
       local target
@@ -215,8 +358,19 @@ push_and_pr() {
     rm -f .autosolve-pr-body
   fi
 
-  # Stage tracked file modifications as safety net
-  git add --update
+  # Stage only files that appear in the working tree diff. This avoids
+  # blindly staging credential files or other artifacts dropped by action
+  # steps (e.g., gha-creds-*.json).
+  local changed_files
+  changed_files="$(printf '%s\n%s\n%s\n' \
+    "$(git diff --name-only)" \
+    "$(git diff --name-only --cached)" \
+    "$(git ls-files --others --exclude-standard)" | sort -u)"
+  local f
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    git add "$f" || log_warning "Failed to stage $f"
+  done <<< "$changed_files"
 
   # Re-run security check on final staged changeset
   security_check
@@ -226,6 +380,9 @@ push_and_pr() {
     log_error "No changes to commit"
     return 1
   fi
+
+  # AI security review: have Claude scan the staged diff for sensitive content
+  ai_security_review
 
   # Build commit message — prefer pr_title, then Claude's subject, then prompt
   local commit_subject

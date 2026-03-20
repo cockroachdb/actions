@@ -1,0 +1,60 @@
+# Example workflow for the simplify skill.
+#
+# To use this in your repo:
+# 1. Copy the simplify.md skill file to .autosolve/skills/simplify.md
+# 2. Copy this file to .github/workflows/autosolve-simplify.yml
+# 3. Adjust the actions ref, auth, and fork settings for your repo
+#
+# Trigger manually via workflow_dispatch in the GitHub Actions UI.
+name: Autosolve - Simplify
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write
+
+jobs:
+  simplify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud (Vertex)
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: vertex-model-runners
+          service_account: vertex-ai-user@vertex-model-runners.iam.gserviceaccount.com
+          workload_identity_provider: projects/108106229451/locations/global/workloadIdentityPools/vertex-ai-user/providers/vertex-ai-user
+
+      - name: Assess
+        id: assess
+        uses: cockroachdb/actions/autosolve/assess@main
+        with:
+          skill: .autosolve/skills/simplify.md
+        env:
+          CLAUDE_CODE_USE_VERTEX: "1"
+          ANTHROPIC_VERTEX_PROJECT_ID: vertex-model-runners
+          CLOUD_ML_REGION: us-east5
+
+      - name: Implement
+        if: steps.assess.outputs.assessment == 'PROCEED'
+        uses: cockroachdb/actions/autosolve/implement@main
+        with:
+          skill: .autosolve/skills/simplify.md
+          pr_labels: autosolve,simplify
+          pr_draft: "true"
+          fork_owner: fantapop
+          fork_repo: ccloud-private
+          fork_push_token: ${{ secrets.AUTOSOLVER_PUSH_TO_FORK_PAT }}
+          pr_create_token: ${{ secrets.AUTOSOLVER_CREATE_PRS_PAT }}
+        env:
+          CLAUDE_CODE_USE_VERTEX: "1"
+          ANTHROPIC_VERTEX_PROJECT_ID: vertex-model-runners
+          CLOUD_ML_REGION: us-east5
