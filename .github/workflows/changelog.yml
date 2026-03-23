@@ -28,7 +28,6 @@ jobs:
         uses: peter-evans/create-or-update-comment@v5
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          comment-tag: changelog-breaking-changes
           body: |
             ${{ steps.changelog-check.outputs.has_breaking == 'true' &&
             '**This PR contains breaking changes**\n\nPlease ensure this is intentional and properly documented.' ||
