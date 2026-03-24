@@ -187,10 +187,9 @@ func ParseBlockedPaths(raw string) []string {
 }
 
 // SecurityReviewModel returns a lightweight model suitable for the AI
-// security review. It uses the full model ID to work with both the API
-// and Vertex backends.
+// security review.
 func (c *Config) SecurityReviewModel() string {
-	return "claude-haiku-4-5-20251001"
+	return "claude-sonnet-4-6"
 }
 
 func envOrDefault(key, def string) string {
