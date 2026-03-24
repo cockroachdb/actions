@@ -77,7 +77,7 @@ func Run(ctx context.Context, cfg *config.Config, runner claude.Runner, tmpDir s
 	action.SetOutputMultiline("summary", summary)
 	action.SetOutputMultiline("result", resultText)
 
-	action.WriteStepSummary(formatStepSummary(assessment, summary) + tracker.FormatSummary())
+	action.WriteStepSummary(formatStepSummary(assessment, summary))
 
 	return nil
 }

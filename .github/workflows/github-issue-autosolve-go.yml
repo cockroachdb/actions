@@ -338,3 +338,8 @@ jobs:
           EXISTING_PR_URL: ${{ steps.check.outputs.pr_url }}
           ASSESSMENT: ${{ steps.assess.outputs.assessment }}
           IMPL_STATUS: ${{ steps.implement.outputs.status }}
+
+      - name: Write token usage summary
+        if: always() && steps.check.outputs.exists != 'true'
+        shell: bash
+        run: ${{ github.workspace }}/actions/autosolve-go/bin/autosolve-linux-amd64 usage-summary

@@ -664,7 +664,6 @@ func writeOutputs(
 		total := tracker.Total()
 		action.LogInfo(fmt.Sprintf("Total usage: input=%d output=%d cost=$%.4f",
 			total.InputTokens, total.OutputTokens, total.CostUSD))
-		sb.WriteString(tracker.FormatSummary())
 	}
 	action.WriteStepSummary(sb.String())
 
