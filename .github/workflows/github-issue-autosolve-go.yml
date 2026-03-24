@@ -310,8 +310,18 @@ jobs:
         run: |
           if [ "$PR_EXISTS" = "true" ]; then
             echo "status=EXISTING_PR" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autosolve"
+              echo "**Status:** Skipped — a PR already exists for this issue: $EXISTING_PR_URL"
+              echo ""
+              echo "To create a new attempt, close the existing PR and add the label again."
+            } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$ASSESSMENT" = "SKIP" ]; then
             echo "status=SKIPPED" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autosolve"
+              echo "**Status:** Skipped — assessment determined this issue is not suitable for automated resolution."
+            } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$IMPL_STATUS" = "SUCCESS" ]; then
             echo "status=SUCCESS" >> "$GITHUB_OUTPUT"
           else
@@ -319,5 +329,6 @@ jobs:
           fi
         env:
           PR_EXISTS: ${{ steps.check.outputs.exists }}
+          EXISTING_PR_URL: ${{ steps.check.outputs.pr_url }}
           ASSESSMENT: ${{ steps.assess.outputs.assessment }}
           IMPL_STATUS: ${{ steps.implement.outputs.status }}
