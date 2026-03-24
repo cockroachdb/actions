@@ -188,9 +188,9 @@ jobs:
         run: |
           {
             echo "PROMPT<<END_OF_PROMPT"
-            echo "Fix GitHub issue #${{ inputs.issue_number }}."
-            echo "Title: $ISSUE_TITLE"
-            echo "Body: $ISSUE_BODY"
+            printf 'Fix GitHub issue #%s.\n' "${{ inputs.issue_number }}"
+            printf 'Title: %s\n' "$ISSUE_TITLE"
+            printf 'Body: %s\n' "$ISSUE_BODY"
             echo "END_OF_PROMPT"
           } >> "$GITHUB_ENV"
         env:
@@ -203,7 +203,7 @@ jobs:
         run: |
           {
             echo "PROMPT<<END_OF_PROMPT"
-            echo "$INPUT_PROMPT"
+            printf '%s\n' "$INPUT_PROMPT"
             echo "END_OF_PROMPT"
           } >> "$GITHUB_ENV"
         env:
@@ -230,13 +230,10 @@ jobs:
         if: steps.check.outputs.exists != 'true' && steps.assess.outputs.assessment == 'SKIP'
         shell: bash
         run: |
+          body="$(printf 'Auto-solver assessed this issue but determined it is not suitable for automated resolution.\n\n```\n%s\n```' "$SUMMARY")"
           gh issue comment "${{ inputs.issue_number }}" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "Auto-solver assessed this issue but determined it is not suitable for automated resolution.
-
-          \`\`\`
-          $SUMMARY
-          \`\`\`"
+            --body "$body"
         env:
           GH_TOKEN: ${{ secrets.repo_token }}
           # Pass summary as an env var as a precautionary measure against
