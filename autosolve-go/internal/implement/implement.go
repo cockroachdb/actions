@@ -602,7 +602,7 @@ func aiSecurityReview(
 
 		outputFile := filepath.Join(tmpDir, fmt.Sprintf("security_review_%d.json", batchNum))
 		result, err := runner.Run(ctx, claude.RunOptions{
-			Model:        "haiku",
+			Model:        cfg.SecurityReviewModel(),
 			AllowedTools: "",
 			MaxTurns:     1,
 			PromptFile:   promptFile,

@@ -151,9 +151,11 @@ func (r *CLIRunner) Run(ctx context.Context, opts RunOptions) (*Result, error) {
 	args := []string{
 		"--print",
 		"--model", opts.Model,
-		"--allowedTools", opts.AllowedTools,
 		"--output-format", "json",
 		"--max-turns", fmt.Sprintf("%d", opts.MaxTurns),
+	}
+	if opts.AllowedTools != "" {
+		args = append(args, "--allowedTools", opts.AllowedTools)
 	}
 	if opts.Resume != "" {
 		args = append(args, "--resume", opts.Resume)
