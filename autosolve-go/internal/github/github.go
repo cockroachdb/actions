@@ -16,7 +16,7 @@ type Client interface {
 	RemoveLabel(ctx context.Context, repo string, issue int, label string) error
 	CreatePR(ctx context.Context, opts PullRequestOptions) (string, error)
 	CreateLabel(ctx context.Context, repo string, name string) error
-	DefaultBranch(ctx context.Context, repo string) (string, error)
+	FindPRByLabel(ctx context.Context, repo string, label string) (string, error)
 }
 
 // PullRequestOptions configures PR creation.
@@ -87,17 +87,19 @@ func (c *GithubClient) CreateLabel(ctx context.Context, repo string, name string
 	return nil
 }
 
-func (c *GithubClient) DefaultBranch(ctx context.Context, repo string) (string, error) {
-	cmd := c.command(ctx, "repo", "view", repo, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+func (c *GithubClient) FindPRByLabel(
+	ctx context.Context, repo string, label string,
+) (string, error) {
+	cmd := c.command(ctx, "pr", "list",
+		"--repo", repo,
+		"--label", label,
+		"--json", "url",
+		"--jq", ".[0].url // empty")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("querying default branch: %w", err)
+		return "", fmt.Errorf("searching for PRs with label %q: %w", label, err)
 	}
-	branch := strings.TrimSpace(string(out))
-	if branch == "" {
-		return "", fmt.Errorf("empty default branch returned for %s", repo)
-	}
-	return branch, nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 func (c *GithubClient) command(ctx context.Context, args ...string) *exec.Cmd {

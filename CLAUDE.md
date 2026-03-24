@@ -68,12 +68,9 @@ scripts that set up temporary git repos and validate behavior.
 - In workflow YAML files, always use the latest major version of built-in
   GitHub Actions (e.g., `actions/checkout@v5`, `actions/upload-artifact@v4`).
 - In autosolve workflows, install the Claude CLI (npm) BEFORE any cloud
-  authentication step, and move credential files out of the workspace
-  immediately after authentication. npm post-install scripts run with the
-  job's full environment, so installing after auth exposes credentials
-  (e.g., the OIDC bearer token in `gha-creds-*.json`) to arbitrary code.
-  The correct step order is: checkout → install CLI → authenticate →
-  move credentials → run autosolve action.
+  authentication step. npm post-install scripts run with the job's full
+  environment, so installing after auth exposes credentials (e.g., the
+  OIDC bearer token in `gha-creds-*.json`) to arbitrary code.
 - Do not silently swallow errors. In shell scripts, avoid `|| return 0`,
   `|| true`, or `|| :` to suppress failures without logging — use
   `log_warning` to surface what went wrong. In Go code, avoid `return nil`

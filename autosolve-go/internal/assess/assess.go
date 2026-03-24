@@ -25,6 +25,8 @@ func Run(ctx context.Context, cfg *config.Config, runner claude.Runner, tmpDir s
 
 	outputFile := filepath.Join(tmpDir, "assessment.json")
 
+	var tracker claude.UsageTracker
+
 	// Invoke Claude in read-only mode
 	result, err := runner.Run(ctx, claude.RunOptions{
 		Model:        cfg.Model,
@@ -36,6 +38,9 @@ func Run(ctx context.Context, cfg *config.Config, runner claude.Runner, tmpDir s
 	if err != nil {
 		return fmt.Errorf("running claude: %w", err)
 	}
+	tracker.Record("assess", result.Usage)
+	action.LogInfo(fmt.Sprintf("Assessment usage: input=%d output=%d cost=$%.4f",
+		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CostUSD))
 	if result.ExitCode != 0 {
 		action.LogWarning(fmt.Sprintf("Claude CLI exited with code %d", result.ExitCode))
 	}
@@ -71,7 +76,7 @@ func Run(ctx context.Context, cfg *config.Config, runner claude.Runner, tmpDir s
 	action.SetOutputMultiline("summary", summary)
 	action.SetOutputMultiline("result", resultText)
 
-	action.WriteStepSummary(formatStepSummary(assessment, summary))
+	action.WriteStepSummary(formatStepSummary(assessment, summary) + tracker.FormatSummary())
 
 	return nil
 }

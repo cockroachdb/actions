@@ -32,6 +32,80 @@ type Result struct {
 	ResultText string
 	SessionID  string
 	ExitCode   int
+	Usage      Usage
+}
+
+// Usage holds token counts and cost from a Claude CLI invocation.
+type Usage struct {
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+	CostUSD                  float64 `json:"cost_usd"`
+}
+
+// Add combines the token counts and cost from another Usage into this one.
+func (u *Usage) Add(other Usage) {
+	u.InputTokens += other.InputTokens
+	u.OutputTokens += other.OutputTokens
+	u.CacheCreationInputTokens += other.CacheCreationInputTokens
+	u.CacheReadInputTokens += other.CacheReadInputTokens
+	u.CostUSD += other.CostUSD
+}
+
+// UsageTracker accumulates token usage across multiple Claude invocations,
+// organized by named sections (e.g. "assess", "implement", "security-review").
+type UsageTracker struct {
+	Sections []UsageSection
+}
+
+// UsageSection records usage for a named phase.
+type UsageSection struct {
+	Name  string
+	Usage Usage
+}
+
+// Record adds usage to the named section.
+func (t *UsageTracker) Record(section string, u Usage) {
+	for i := range t.Sections {
+		if t.Sections[i].Name == section {
+			t.Sections[i].Usage.Add(u)
+			return
+		}
+	}
+	t.Sections = append(t.Sections, UsageSection{Name: section, Usage: u})
+}
+
+// Total returns the combined usage across all sections.
+func (t *UsageTracker) Total() Usage {
+	var total Usage
+	for _, s := range t.Sections {
+		total.Add(s.Usage)
+	}
+	return total
+}
+
+// FormatSummary returns a markdown table summarizing usage by section with totals.
+func (t *UsageTracker) FormatSummary() string {
+	if len(t.Sections) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("### Token Usage\n")
+	b.WriteString("| Section | Input | Output | Cache Create | Cache Read | Cost |\n")
+	b.WriteString("|---------|------:|-------:|-------------:|-----------:|-----:|\n")
+	for _, s := range t.Sections {
+		fmt.Fprintf(&b, "| %s | %d | %d | %d | %d | $%.4f |\n",
+			s.Name, s.Usage.InputTokens, s.Usage.OutputTokens,
+			s.Usage.CacheCreationInputTokens, s.Usage.CacheReadInputTokens,
+			s.Usage.CostUSD)
+	}
+	total := t.Total()
+	fmt.Fprintf(&b, "| **Total** | **%d** | **%d** | **%d** | **%d** | **$%.4f** |\n",
+		total.InputTokens, total.OutputTokens,
+		total.CacheCreationInputTokens, total.CacheReadInputTokens,
+		total.CostUSD)
+	return b.String()
 }
 
 // CLIRunner is the production Runner that shells out to the claude binary.
@@ -120,9 +194,18 @@ func ExtractSessionID(outputFile string) string {
 
 // claudeOutput represents the JSON structure from claude --print --output-format json.
 type claudeOutput struct {
-	Type      string `json:"type"`
-	Result    string `json:"result"`
-	SessionID string `json:"session_id"`
+	Type         string          `json:"type"`
+	Result       string          `json:"result"`
+	SessionID    string          `json:"session_id"`
+	TotalCostUSD float64         `json:"total_cost_usd"`
+	Usage        json.RawMessage `json:"usage"`
+}
+
+type claudeUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 func parseOutput(path string) (*Result, error) {
@@ -140,9 +223,21 @@ func parseOutput(path string) (*Result, error) {
 		return nil, fmt.Errorf("unexpected output type: %s", out.Type)
 	}
 
+	usage := Usage{CostUSD: out.TotalCostUSD}
+	if out.Usage != nil {
+		var u claudeUsage
+		if err := json.Unmarshal(out.Usage, &u); err == nil {
+			usage.InputTokens = u.InputTokens
+			usage.OutputTokens = u.OutputTokens
+			usage.CacheCreationInputTokens = u.CacheCreationInputTokens
+			usage.CacheReadInputTokens = u.CacheReadInputTokens
+		}
+	}
+
 	return &Result{
 		ResultText: out.Result,
 		SessionID:  out.SessionID,
+		Usage:      usage,
 	}, nil
 }
 

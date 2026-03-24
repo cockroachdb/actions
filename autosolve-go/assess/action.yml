@@ -2,7 +2,7 @@ name: Autosolve Assess (Go)
 description: Run Claude in read-only mode to assess whether a task is suitable for automated resolution.
 
 # Prerequisites:
-#   The calling workflow must install the Claude CLI BEFORE authenticating
+#   The calling workflow should install the Claude CLI BEFORE authenticating
 #   to any cloud provider.  npm post-install scripts run with the job's
 #   full environment, so installing after auth would expose credentials
 #   (e.g. the OIDC bearer token in gha-creds-*.json) to arbitrary code.
@@ -47,14 +47,10 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Build autosolve
-      shell: bash
-      run: cd "${{ github.action_path }}/.." && go build -o /tmp/autosolve ./cmd/autosolve
-
     - name: Run assessment
       id: assess
       shell: bash
-      run: /tmp/autosolve assess
+      run: "${{ github.action_path }}/../bin/autosolve-linux-amd64" assess
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_SKILL: ${{ inputs.skill }}

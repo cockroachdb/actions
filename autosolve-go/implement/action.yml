@@ -109,14 +109,10 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Build autosolve
-      shell: bash
-      run: cd "${{ github.action_path }}/.." && go build -o /tmp/autosolve ./cmd/autosolve
-
     - name: Run implementation
       id: implement
       shell: bash
-      run: /tmp/autosolve implement
+      run: "${{ github.action_path }}/../bin/autosolve-linux-amd64" implement
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_SKILL: ${{ inputs.skill }}

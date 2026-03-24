@@ -38,13 +38,6 @@ func Run(
 	gitClient git.Client,
 	tmpDir string,
 ) error {
-	// Ensure we're on the default branch so the PR diff is clean.
-	// workflow_dispatch on a non-default branch checks out that branch,
-	// which would include unrelated commits in the PR.
-	if err := ensureDefaultBranch(ctx, gitClient, ghClient, cfg.GithubRepository); err != nil {
-		action.LogWarning(fmt.Sprintf("Could not switch to default branch: %v", err))
-	}
-
 	// Warn if the repo is missing recommended .gitignore patterns
 	security.CheckGitignore(action.LogWarning)
 
@@ -63,6 +56,7 @@ func Run(
 		sessionID  string
 		implStatus = "FAILED"
 		resultText string
+		tracker    claude.UsageTracker
 	)
 
 	// Retry loop
@@ -92,6 +86,10 @@ func Run(
 		if err != nil {
 			return fmt.Errorf("running claude (attempt %d): %w", attempt, err)
 		}
+		section := fmt.Sprintf("implement (attempt %d)", attempt)
+		tracker.Record(section, result.Usage)
+		action.LogInfo(fmt.Sprintf("Attempt %d usage: input=%d output=%d cost=$%.4f",
+			attempt, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CostUSD))
 		if result.ExitCode != 0 {
 			action.LogWarning(fmt.Sprintf("Claude CLI exited with code %d on attempt %d", result.ExitCode, attempt))
 		}
@@ -148,7 +146,7 @@ func Run(
 				action.LogWarning(v)
 			}
 			action.LogWarning("Security check failed: blocked paths were modified")
-			return writeOutputs("FAILED", "", "", resultText)
+			return writeOutputs("FAILED", "", "", resultText, &tracker)
 		}
 		action.LogNotice("Security check passed")
 	}
@@ -157,10 +155,10 @@ func Run(
 	var prURL, branchName string
 	if implStatus == "SUCCESS" && cfg.CreatePR {
 		var err error
-		prURL, branchName, err = pushAndPR(ctx, cfg, runner, ghClient, gitClient, tmpDir, resultText)
+		prURL, branchName, err = pushAndPR(ctx, cfg, runner, ghClient, gitClient, tmpDir, resultText, &tracker)
 		if err != nil {
 			action.LogWarning(fmt.Sprintf("PR creation failed: %v", err))
-			return writeOutputs("FAILED", "", "", resultText)
+			return writeOutputs("FAILED", "", "", resultText, &tracker)
 		}
 	}
 
@@ -175,7 +173,7 @@ func Run(
 		}
 	}
 
-	return writeOutputs(status, prURL, branchName, resultText)
+	return writeOutputs(status, prURL, branchName, resultText, &tracker)
 }
 
 // Cleanup removes credentials and temporary state.
@@ -191,6 +189,7 @@ func pushAndPR(
 	ghClient github.Client,
 	gitClient git.Client,
 	tmpDir, resultText string,
+	tracker *claude.UsageTracker,
 ) (prURL, branchName string, err error) {
 	// Default base branch
 	baseBranch := cfg.PRBaseBranch
@@ -275,7 +274,7 @@ func pushAndPR(
 	}
 
 	// AI security review: have Claude scan the staged diff for sensitive content
-	if err := aiSecurityReview(ctx, cfg, runner, gitClient, tmpDir); err != nil {
+	if err := aiSecurityReview(ctx, cfg, runner, gitClient, tmpDir, tracker); err != nil {
 		return "", "", fmt.Errorf("AI security review failed: %w", err)
 	}
 
@@ -426,8 +425,8 @@ func extractSummary(resultText, marker string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-const securityReviewPrompt = `You are a security reviewer. Your ONLY task is to review the following
-git diff for sensitive content that should NOT be committed to a repository.
+const securityReviewFirstBatchPrompt = `You are a security reviewer. Your ONLY task is to review the following
+changes for sensitive content that should NOT be committed to a repository.
 
 Look for:
 - Credentials, API keys, tokens, passwords (hardcoded or in config)
@@ -437,7 +436,11 @@ Look for:
 - Database connection strings with embedded passwords
 - Any other secrets or sensitive data
 
-Here is the staged diff:
+## All changed files in this commit
+
+%s
+
+## Diff to review (batch %d of %d)
 
 %s
 
@@ -447,106 +450,193 @@ SECURITY_REVIEW - FAILED (if any sensitive content found)
 
 If you find sensitive content, list each finding before the FAIL marker.`
 
+const securityReviewBatchPrompt = `You are a security reviewer. Your ONLY task is to review the following
+diff for sensitive content that should NOT be committed to a repository.
+
+Look for:
+- Credentials, API keys, tokens, passwords (hardcoded or in config)
+- Private keys, certificates, keystores
+- Cloud provider credential files (e.g., gha-creds-*.json, service account keys)
+- .env files or environment variable files containing secrets
+- Database connection strings with embedded passwords
+- Any other secrets or sensitive data
+
+## Diff to review (batch %d of %d)
+
+%s
+
+**OUTPUT REQUIREMENT**: End your response with exactly one of:
+SECURITY_REVIEW - SUCCESS (if no sensitive content found)
+SECURITY_REVIEW - FAILED (if any sensitive content found)
+
+If you find sensitive content, list each finding before the FAIL marker.`
+
+// maxBatchSize is the approximate max character size for a batch of diffs
+// sent to the AI security reviewer. Leaves room for the prompt template
+// and file list.
+const maxBatchSize = 80000
+
+// generatedMarkers are strings that indicate a file is auto-generated.
+var generatedMarkers = []string{
+	"// Code generated",
+	"# Code generated",
+	"/* Code generated",
+	"// DO NOT EDIT",
+	"# DO NOT EDIT",
+	"// auto-generated",
+	"# auto-generated",
+	"generated by",
+}
+
+// isGeneratedDiff checks whether a per-file diff contains a generated-file
+// marker in its first few added lines.
+func isGeneratedDiff(diff string) bool {
+	lines := strings.Split(diff, "\n")
+	checked := 0
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+			continue
+		}
+		for _, marker := range generatedMarkers {
+			if strings.Contains(strings.ToLower(line), strings.ToLower(marker)) {
+				return true
+			}
+		}
+		checked++
+		if checked >= 10 {
+			break
+		}
+	}
+	return false
+}
+
 // aiSecurityReview runs a lightweight Claude invocation to scan the staged
-// diff for sensitive content that pattern matching might miss.
+// diff for sensitive content that pattern matching might miss. It reviews
+// all changed file names and batches diffs to avoid truncation.
 func aiSecurityReview(
 	ctx context.Context,
 	cfg *config.Config,
 	runner claude.Runner,
 	gitClient git.Client,
 	tmpDir string,
+	tracker *claude.UsageTracker,
 ) error {
 	action.LogInfo("Running AI security review on staged changes...")
 
-	diff, err := gitClient.Diff("--cached")
+	// Get the list of staged files
+	stagedOutput, err := gitClient.Diff("--cached", "--name-only")
 	if err != nil {
-		action.LogWarning("Could not get staged diff for AI review, skipping")
-		return nil
+		return fmt.Errorf("listing staged files: %w", err)
 	}
-	if diff == "" {
-		return nil
-	}
-
-	// Truncate very large diffs to avoid blowing context
-	const maxDiffLen = 100000
-	if len(diff) > maxDiffLen {
-		diff = diff[:maxDiffLen] + "\n... (truncated)"
-	}
-
-	promptText := fmt.Sprintf(securityReviewPrompt, diff)
-	promptFile := filepath.Join(tmpDir, "security_review_prompt.txt")
-	if err := os.WriteFile(promptFile, []byte(promptText), 0644); err != nil {
-		action.LogWarning(fmt.Sprintf("Failed to write security review prompt: %v", err))
+	if stagedOutput == "" {
 		return nil
 	}
 
-	outputFile := filepath.Join(tmpDir, "security_review.json")
-	result, err := runner.Run(ctx, claude.RunOptions{
-		Model:        "haiku",
-		AllowedTools: "",
-		MaxTurns:     1,
-		PromptFile:   promptFile,
-		OutputFile:   outputFile,
-	})
-	if err != nil {
-		action.LogWarning(fmt.Sprintf("AI security review failed to run: %v", err))
+	var allFiles []string
+	for _, f := range strings.Split(stagedOutput, "\n") {
+		if f != "" {
+			allFiles = append(allFiles, f)
+		}
+	}
+	fileList := strings.Join(allFiles, "\n")
+
+	// Collect per-file diffs, skipping generated files
+	type fileDiff struct {
+		name string
+		diff string
+	}
+	var diffs []fileDiff
+	for _, f := range allFiles {
+		d, err := gitClient.Diff("--cached", "--", f)
+		if err != nil {
+			action.LogWarning(fmt.Sprintf("Could not get diff for %s, skipping", f))
+			continue
+		}
+		if d == "" {
+			continue
+		}
+		if isGeneratedDiff(d) {
+			action.LogInfo(fmt.Sprintf("Skipping generated file: %s", f))
+			continue
+		}
+		diffs = append(diffs, fileDiff{name: f, diff: d})
+	}
+
+	if len(diffs) == 0 {
+		action.LogInfo("No non-generated diffs to review")
 		return nil
 	}
 
-	resultText, positive, _ := claude.ExtractResult(outputFile, "SECURITY_REVIEW")
-	if result.ExitCode != 0 || resultText == "" {
-		action.LogWarning("AI security review did not produce a result, skipping")
-		return nil
+	// Build batches that fit within maxBatchSize
+	var batches []string
+	var current strings.Builder
+	for _, fd := range diffs {
+		// If adding this diff would exceed the limit, finalize the current batch
+		if current.Len() > 0 && current.Len()+len(fd.diff) > maxBatchSize {
+			batches = append(batches, current.String())
+			current.Reset()
+		}
+		// If a single file exceeds the limit, include it as its own batch
+		current.WriteString(fd.diff)
+		current.WriteString("\n")
+	}
+	if current.Len() > 0 {
+		batches = append(batches, current.String())
 	}
 
-	if !positive {
-		action.LogWarning("AI security review found sensitive content:")
-		action.LogWarning(resultText)
-		_ = gitClient.ResetHead()
-		return fmt.Errorf("sensitive content detected in staged changes")
+	action.LogInfo(fmt.Sprintf("AI security review: %d file(s), %d batch(es)", len(diffs), len(batches)))
+
+	// Review each batch
+	for i, batch := range batches {
+		batchNum := i + 1
+		var promptText string
+		if batchNum == 1 {
+			promptText = fmt.Sprintf(securityReviewFirstBatchPrompt, fileList, batchNum, len(batches), batch)
+		} else {
+			promptText = fmt.Sprintf(securityReviewBatchPrompt, batchNum, len(batches), batch)
+		}
+		promptFile := filepath.Join(tmpDir, fmt.Sprintf("security_review_prompt_%d.txt", batchNum))
+		if err := os.WriteFile(promptFile, []byte(promptText), 0644); err != nil {
+			return fmt.Errorf("writing security review prompt: %w", err)
+		}
+
+		outputFile := filepath.Join(tmpDir, fmt.Sprintf("security_review_%d.json", batchNum))
+		result, err := runner.Run(ctx, claude.RunOptions{
+			Model:        "haiku",
+			AllowedTools: "",
+			MaxTurns:     1,
+			PromptFile:   promptFile,
+			OutputFile:   outputFile,
+		})
+		if err != nil {
+			return fmt.Errorf("AI security review batch %d: %w", batchNum, err)
+		}
+		tracker.Record("security review", result.Usage)
+		action.LogInfo(fmt.Sprintf("Security review batch %d usage: input=%d output=%d cost=$%.4f",
+			batchNum, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CostUSD))
+
+		resultText, positive, _ := claude.ExtractResult(outputFile, "SECURITY_REVIEW")
+		if result.ExitCode != 0 || resultText == "" {
+			return fmt.Errorf("AI security review batch %d did not produce a result (exit code %d)", batchNum, result.ExitCode)
+		}
+
+		if !positive {
+			action.LogWarning(fmt.Sprintf("AI security review found sensitive content in batch %d:", batchNum))
+			action.LogWarning(resultText)
+			_ = gitClient.ResetHead()
+			return fmt.Errorf("sensitive content detected in staged changes")
+		}
+
+		action.LogInfo(fmt.Sprintf("AI security review batch %d/%d passed", batchNum, len(batches)))
 	}
 
 	action.LogNotice("AI security review passed")
 	return nil
 }
 
-// ensureDefaultBranch checks out the repository's default branch if the
-// current HEAD is on a different branch. This prevents workflow_dispatch
-// runs from non-default branches from including unrelated commits in PRs.
-func ensureDefaultBranch(
-	ctx context.Context, gitClient git.Client, ghClient github.Client, repo string,
+func writeOutputs(
+	status, prURL, branchName, resultText string, tracker *claude.UsageTracker,
 ) error {
-	// Determine default branch: try git first, fall back to GitHub API
-	defaultBranch := ""
-	ref, err := gitClient.SymbolicRef("refs/remotes/origin/HEAD")
-	if err == nil {
-		defaultBranch = strings.TrimPrefix(ref, "refs/remotes/origin/")
-	} else {
-		action.LogInfo("refs/remotes/origin/HEAD not set, querying GitHub API for default branch")
-		branch, apiErr := ghClient.DefaultBranch(ctx, repo)
-		if apiErr != nil {
-			return fmt.Errorf("could not determine default branch: git symbolic-ref failed (%v) and GitHub API failed (%v)", err, apiErr)
-		}
-		defaultBranch = branch
-	}
-
-	currentRef, err := gitClient.SymbolicRef("HEAD")
-	if err != nil {
-		action.LogWarning("HEAD is detached, cannot determine current branch")
-		return nil
-	}
-	currentBranch := strings.TrimPrefix(currentRef, "refs/heads/")
-
-	if currentBranch != defaultBranch {
-		action.LogInfo(fmt.Sprintf("Switching from %s to default branch %s", currentBranch, defaultBranch))
-		if err := gitClient.Checkout(defaultBranch); err != nil {
-			return fmt.Errorf("checking out %s: %w", defaultBranch, err)
-		}
-	}
-	return nil
-}
-
-func writeOutputs(status, prURL, branchName, resultText string) error {
 	summary := extractSummary(resultText, "IMPLEMENTATION_RESULT")
 	summary = action.TruncateOutput(200, summary)
 
@@ -566,6 +656,12 @@ func writeOutputs(status, prURL, branchName, resultText string) error {
 	}
 	if summary != "" {
 		fmt.Fprintf(&sb, "### Summary\n%s\n", summary)
+	}
+	if tracker != nil {
+		total := tracker.Total()
+		action.LogInfo(fmt.Sprintf("Total usage: input=%d output=%d cost=$%.4f",
+			total.InputTokens, total.OutputTokens, total.CostUSD))
+		sb.WriteString(tracker.FormatSummary())
 	}
 	action.WriteStepSummary(sb.String())
 

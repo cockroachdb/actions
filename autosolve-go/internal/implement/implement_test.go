@@ -85,8 +85,8 @@ func (m *mockGHClient) CreateLabel(_ context.Context, _ string, name string) err
 	return nil
 }
 
-func (m *mockGHClient) DefaultBranch(_ context.Context, _ string) (string, error) {
-	return "main", nil
+func (m *mockGHClient) FindPRByLabel(_ context.Context, _ string, _ string) (string, error) {
+	return "", nil
 }
 
 type mockGitClient struct{}
@@ -206,7 +206,7 @@ func TestWriteOutputs(t *testing.T) {
 	t.Setenv("GITHUB_OUTPUT", tmpDir+"/output")
 	t.Setenv("GITHUB_STEP_SUMMARY", tmpDir+"/summary")
 
-	err := writeOutputs("SUCCESS", "https://github.com/org/repo/pull/1", "autosolve/fix-123", "Done\nIMPLEMENTATION_RESULT - SUCCESS")
+	err := writeOutputs("SUCCESS", "https://github.com/org/repo/pull/1", "autosolve/fix-123", "Done\nIMPLEMENTATION_RESULT - SUCCESS", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

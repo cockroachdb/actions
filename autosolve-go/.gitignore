@@ -1,2 +1,2 @@
-# Built binary (lives at repo root of autosolve-go/)
+# Local dev binary (built by `make build` or `go build`)
 /autosolve

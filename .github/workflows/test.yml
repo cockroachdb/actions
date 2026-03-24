@@ -8,4 +8,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - run: ./test.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: autosolve-go/go.mod
+      - name: Run shell tests
+        run: ./test.sh
+      - name: Run Go tests
+        run: cd autosolve-go && go test ./... -count=1
+      - name: Check precompiled binary is up to date
+        run: |
+          cd autosolve-go
+          ./build.sh
+          if ! git diff --quiet --exit-code bin/; then
+            echo "::error::Precompiled binary is stale. Run ./autosolve-go/build.sh and commit the result."
+            git diff --stat bin/
+            exit 1
+          fi
