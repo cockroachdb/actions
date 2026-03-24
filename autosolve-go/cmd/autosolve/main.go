@@ -18,9 +18,8 @@ import (
 const usage = `Usage: autosolve <command>
 
 Commands:
-  assess          Run assessment phase
-  implement       Run implementation phase
-  usage-summary   Write token usage summary to step summary
+  assess      Run assessment phase
+  implement   Run implementation phase
 `
 
 func main() {
@@ -37,8 +36,6 @@ func main() {
 		err = runAssess(ctx)
 	case "implement":
 		err = runImplement(ctx)
-	case "usage-summary":
-		err = runUsageSummary()
 	default:
 		fatalf("unknown command: %s\n\n%s", os.Args[1], usage)
 	}
@@ -87,16 +84,6 @@ func runImplement(ctx context.Context) error {
 
 	ghClient := &github.GithubClient{Token: cfg.PRCreateToken}
 	return implement.Run(ctx, cfg, &claude.CLIRunner{}, ghClient, gitClient, tmpDir)
-}
-
-func runUsageSummary() error {
-	var tracker claude.UsageTracker
-	tracker.Load()
-	if len(tracker.Sections) == 0 {
-		return nil
-	}
-	action.WriteStepSummary(tracker.FormatSummary())
-	return nil
 }
 
 func ensureTmpDir() (string, error) {

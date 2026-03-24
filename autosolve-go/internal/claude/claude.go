@@ -134,13 +134,26 @@ func (t *UsageTracker) Load() {
 	t.Sections = append(sections, t.Sections...)
 }
 
-// Save writes the current usage sections to the shared file.
+// Save writes the current usage sections to the shared JSON file and
+// renders the formatted markdown table alongside it. The markdown file
+// is always a complete, self-contained table ready to append to
+// GITHUB_STEP_SUMMARY.
 func (t *UsageTracker) Save() {
 	data, err := json.Marshal(t.Sections)
 	if err != nil {
 		return
 	}
 	_ = os.WriteFile(UsageFilePath(), data, 0644)
+	_ = os.WriteFile(UsageSummaryPath(), []byte(t.FormatSummary()), 0644)
+}
+
+// UsageSummaryPath returns the path to the rendered markdown usage table.
+func UsageSummaryPath() string {
+	dir := os.Getenv("RUNNER_TEMP")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "autosolve-usage.md")
 }
 
 // CLIRunner is the production Runner that shells out to the claude binary.

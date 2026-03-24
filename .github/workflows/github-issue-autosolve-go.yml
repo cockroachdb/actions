@@ -334,4 +334,9 @@ jobs:
 
       - name: Write token usage summary
         if: always() && steps.check.outputs.exists != 'true'
-        uses: cockroachdb/actions/autosolve-go/usage-summary@autosolve-go-rewrite
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/autosolve-usage.md"
+          if [ -f "$f" ]; then
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          fi

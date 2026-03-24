@@ -1,9 +1,0 @@
-name: Autosolve Usage Summary (Go)
-description: Write a combined token usage summary table to the GitHub Actions step summary.
-
-runs:
-  using: "composite"
-  steps:
-    - name: Write usage summary
-      shell: bash
-      run: ${{ github.action_path }}/../bin/autosolve-linux-amd64 usage-summary
