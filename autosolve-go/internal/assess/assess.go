@@ -39,6 +39,7 @@ func Run(ctx context.Context, cfg *config.Config, runner claude.Runner, tmpDir s
 		return fmt.Errorf("running claude: %w", err)
 	}
 	tracker.Record("assess", result.Usage)
+	tracker.Save()
 	action.LogInfo(fmt.Sprintf("Assessment usage: input=%d output=%d cost=$%.4f",
 		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CostUSD))
 	if result.ExitCode != 0 {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -106,6 +107,40 @@ func (t *UsageTracker) FormatSummary() string {
 		total.CacheCreationInputTokens, total.CacheReadInputTokens,
 		total.CostUSD)
 	return b.String()
+}
+
+// UsageFilePath returns the path to the shared usage file, using RUNNER_TEMP
+// if available (GitHub Actions), falling back to the system temp directory.
+func UsageFilePath() string {
+	dir := os.Getenv("RUNNER_TEMP")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, "autosolve-usage.json")
+}
+
+// Load reads previously saved usage sections from the shared file.
+// Returns an empty tracker if the file doesn't exist.
+func (t *UsageTracker) Load() {
+	data, err := os.ReadFile(UsageFilePath())
+	if err != nil {
+		return
+	}
+	var sections []UsageSection
+	if err := json.Unmarshal(data, &sections); err != nil {
+		return
+	}
+	// Prepend loaded sections so earlier phases appear first
+	t.Sections = append(sections, t.Sections...)
+}
+
+// Save writes the current usage sections to the shared file.
+func (t *UsageTracker) Save() {
+	data, err := json.Marshal(t.Sections)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(UsageFilePath(), data, 0644)
 }
 
 // CLIRunner is the production Runner that shells out to the claude binary.

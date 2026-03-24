@@ -658,6 +658,9 @@ func writeOutputs(
 		fmt.Fprintf(&sb, "### Summary\n%s\n", summary)
 	}
 	if tracker != nil {
+		// Load usage from earlier steps (e.g. assess) so the table is combined
+		tracker.Load()
+		tracker.Save()
 		total := tracker.Total()
 		action.LogInfo(fmt.Sprintf("Total usage: input=%d output=%d cost=$%.4f",
 			total.InputTokens, total.OutputTokens, total.CostUSD))
