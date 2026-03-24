@@ -32,6 +32,10 @@ inputs:
     description: Comma-separated path prefixes that cannot be modified (injected into security preamble).
     required: false
     default: ".github/workflows/"
+  working_directory:
+    description: Directory to run in (relative to workspace root). Defaults to workspace root.
+    required: false
+    default: "."
 
 outputs:
   assessment:
@@ -50,6 +54,7 @@ runs:
     - name: Run assessment
       id: assess
       shell: bash
+      working-directory: ${{ inputs.working_directory }}
       run: ${{ github.action_path }}/../bin/autosolve-linux-amd64 assess
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}

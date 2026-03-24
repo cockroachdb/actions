@@ -100,6 +100,10 @@ concurrency:
   group: autosolve-issue-${{ inputs.issue_number }}
   cancel-in-progress: false
 
+env:
+  # Directory name for the target repo checkout (side-by-side layout).
+  REPO_DIR: repo
+
 jobs:
   solve:
     runs-on: ubuntu-latest
@@ -110,7 +114,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: repo
+        working-directory: ${{ env.REPO_DIR }}
     outputs:
       status: ${{ steps.final_status.outputs.status }}
       pr_url: ${{ steps.implement.outputs.pr_url }}
@@ -124,7 +128,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          path: repo
+          path: ${{ env.REPO_DIR }}
 
       - name: Checkout actions repo
         uses: actions/checkout@v5
@@ -225,6 +229,7 @@ jobs:
           additional_instructions: ${{ inputs.additional_instructions }}
           model: ${{ inputs.model }}
           blocked_paths: ${{ inputs.blocked_paths }}
+          working_directory: ${{ env.REPO_DIR }}
 
       - name: Comment that issue was skipped
         if: steps.check.outputs.exists != 'true' && steps.assess.outputs.assessment == 'SKIP'
@@ -268,6 +273,7 @@ jobs:
           git_user_name: ${{ inputs.git_user_name }}
           git_user_email: ${{ inputs.git_user_email }}
           branch_suffix: "issue-${{ inputs.issue_number }}"
+          working_directory: ${{ env.REPO_DIR }}
 
       - name: Comment that implementation succeeded
         if: steps.implement.outputs.status == 'SUCCESS'
