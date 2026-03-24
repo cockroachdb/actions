@@ -130,13 +130,6 @@ jobs:
           persist-credentials: false
           path: ${{ env.REPO_DIR }}
 
-      - name: Checkout actions repo
-        uses: actions/checkout@v5
-        with:
-          repository: cockroachdb/actions
-          path: actions
-          sparse-checkout: autosolve-go/bin
-
       # --- Check for existing PR ---
       - name: Check for existing PR
         id: check
@@ -341,5 +334,4 @@ jobs:
 
       - name: Write token usage summary
         if: always() && steps.check.outputs.exists != 'true'
-        shell: bash
-        run: ${{ github.workspace }}/actions/autosolve-go/bin/autosolve-linux-amd64 usage-summary
+        uses: cockroachdb/actions/autosolve-go/usage-summary@autosolve-go-rewrite
