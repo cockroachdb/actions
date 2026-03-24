@@ -112,7 +112,7 @@ runs:
     - name: Run implementation
       id: implement
       shell: bash
-      run: "${{ github.action_path }}/../bin/autosolve-linux-amd64" implement
+      run: ${{ github.action_path }}/../bin/autosolve-linux-amd64 implement
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_SKILL: ${{ inputs.skill }}

@@ -50,7 +50,7 @@ runs:
     - name: Run assessment
       id: assess
       shell: bash
-      run: "${{ github.action_path }}/../bin/autosolve-linux-amd64" assess
+      run: ${{ github.action_path }}/../bin/autosolve-linux-amd64 assess
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_SKILL: ${{ inputs.skill }}
