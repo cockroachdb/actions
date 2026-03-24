@@ -109,51 +109,72 @@ func (t *UsageTracker) FormatSummary() string {
 	return b.String()
 }
 
-// UsageFilePath returns the path to the shared usage file, using RUNNER_TEMP
-// if available (GitHub Actions), falling back to the system temp directory.
-func UsageFilePath() string {
-	dir := os.Getenv("RUNNER_TEMP")
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, "autosolve-usage.json")
-}
-
-// Load reads previously saved usage sections from the shared file.
-// Returns an empty tracker if the file doesn't exist.
-func (t *UsageTracker) Load() {
-	data, err := os.ReadFile(UsageFilePath())
-	if err != nil {
-		return
-	}
-	var sections []UsageSection
-	if err := json.Unmarshal(data, &sections); err != nil {
-		return
-	}
-	// Prepend loaded sections so earlier phases appear first
-	t.Sections = append(sections, t.Sections...)
-}
-
-// Save writes the current usage sections to the shared JSON file and
-// renders the formatted markdown table alongside it. The markdown file
-// is always a complete, self-contained table ready to append to
-// GITHUB_STEP_SUMMARY.
-func (t *UsageTracker) Save() {
-	data, err := json.Marshal(t.Sections)
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(UsageFilePath(), data, 0644)
-	_ = os.WriteFile(UsageSummaryPath(), []byte(t.FormatSummary()), 0644)
-}
-
-// UsageSummaryPath returns the path to the rendered markdown usage table.
+// UsageSummaryPath returns the path to the rendered markdown usage table,
+// using RUNNER_TEMP if available (GitHub Actions), falling back to the
+// system temp directory.
 func UsageSummaryPath() string {
 	dir := os.Getenv("RUNNER_TEMP")
 	if dir == "" {
 		dir = os.TempDir()
 	}
 	return filepath.Join(dir, "autosolve-usage.md")
+}
+
+// Load reads previously saved usage sections by parsing the markdown
+// table at UsageSummaryPath. Silently returns if the file doesn't exist
+// or can't be parsed. Loaded sections are prepended so earlier phases
+// appear first.
+func (t *UsageTracker) Load() {
+	data, err := os.ReadFile(UsageSummaryPath())
+	if err != nil {
+		return
+	}
+	sections := ParseSummary(string(data))
+	t.Sections = append(sections, t.Sections...)
+}
+
+// Save writes the formatted markdown usage table to UsageSummaryPath.
+// The file is always a complete, self-contained table ready to append
+// to GITHUB_STEP_SUMMARY.
+func (t *UsageTracker) Save() {
+	_ = os.WriteFile(UsageSummaryPath(), []byte(t.FormatSummary()), 0644)
+}
+
+// ParseSummary parses a markdown usage table (as produced by
+// FormatSummary) back into UsageSection entries. It skips header rows
+// and the totals row.
+func ParseSummary(md string) []UsageSection {
+	var sections []UsageSection
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+		// Skip header, separator, and totals rows
+		if strings.Contains(line, "Section") ||
+			strings.Contains(line, "---") ||
+			strings.Contains(line, "**Total**") {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		// Expected: empty, name, input, output, cache_create, cache_read, cost, empty
+		if len(parts) < 8 {
+			continue
+		}
+		name := strings.TrimSpace(parts[1])
+		if name == "" {
+			continue
+		}
+		var s UsageSection
+		s.Name = name
+		fmt.Sscanf(strings.TrimSpace(parts[2]), "%d", &s.Usage.InputTokens)
+		fmt.Sscanf(strings.TrimSpace(parts[3]), "%d", &s.Usage.OutputTokens)
+		fmt.Sscanf(strings.TrimSpace(parts[4]), "%d", &s.Usage.CacheCreationInputTokens)
+		fmt.Sscanf(strings.TrimSpace(parts[5]), "%d", &s.Usage.CacheReadInputTokens)
+		fmt.Sscanf(strings.TrimSpace(parts[6]), "$%f", &s.Usage.CostUSD)
+		sections = append(sections, s)
+	}
+	return sections
 }
 
 // CLIRunner is the production Runner that shells out to the claude binary.

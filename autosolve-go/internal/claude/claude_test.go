@@ -129,6 +129,78 @@ func TestExtractResult_FileNotFound(t *testing.T) {
 	}
 }
 
+func TestUsageTracker_RoundTrip(t *testing.T) {
+	var tracker UsageTracker
+	tracker.Record("assess", Usage{
+		InputTokens:              6,
+		OutputTokens:             792,
+		CacheCreationInputTokens: 100,
+		CacheReadInputTokens:     50,
+		CostUSD:                  0.2636,
+	})
+	tracker.Record("implement (attempt 1)", Usage{
+		InputTokens:  1950,
+		OutputTokens: 8796,
+		CostUSD:      0.8105,
+	})
+	tracker.Record("security review", Usage{
+		InputTokens:  3,
+		OutputTokens: 49,
+		CostUSD:      0.0383,
+	})
+
+	md := tracker.FormatSummary()
+	parsed := ParseSummary(md)
+
+	if len(parsed) != len(tracker.Sections) {
+		t.Fatalf("expected %d sections, got %d", len(tracker.Sections), len(parsed))
+	}
+	for i, want := range tracker.Sections {
+		got := parsed[i]
+		if got.Name != want.Name {
+			t.Errorf("section %d: name = %q, want %q", i, got.Name, want.Name)
+		}
+		if got.Usage != want.Usage {
+			t.Errorf("section %d (%s): usage = %+v, want %+v", i, want.Name, got.Usage, want.Usage)
+		}
+	}
+}
+
+func TestUsageTracker_LoadSave(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("RUNNER_TEMP", dir)
+
+	// Simulate assess phase saving
+	var assess UsageTracker
+	assess.Record("assess", Usage{InputTokens: 100, OutputTokens: 200, CostUSD: 0.50})
+	assess.Save()
+
+	// Simulate implement phase loading assess data and adding its own
+	var impl UsageTracker
+	impl.Record("implement (attempt 1)", Usage{InputTokens: 500, OutputTokens: 1000, CostUSD: 1.25})
+	impl.Load()
+	impl.Save()
+
+	// Verify the final file has both sections
+	final := ParseSummary(impl.FormatSummary())
+	if len(final) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(final))
+	}
+	if final[0].Name != "assess" {
+		t.Errorf("first section = %q, want 'assess'", final[0].Name)
+	}
+	if final[1].Name != "implement (attempt 1)" {
+		t.Errorf("second section = %q, want 'implement (attempt 1)'", final[1].Name)
+	}
+}
+
+func TestParseSummary_Empty(t *testing.T) {
+	sections := ParseSummary("")
+	if len(sections) != 0 {
+		t.Errorf("expected 0 sections, got %d", len(sections))
+	}
+}
+
 func writeJSON(t *testing.T, v interface{}) string {
 	t.Helper()
 	data, err := json.Marshal(v)
