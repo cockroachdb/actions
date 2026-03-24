@@ -81,11 +81,15 @@ func (c *CLIClient) SymbolicRef(ref string) (string, error) {
 }
 
 func (c *CLIClient) run(args ...string) error {
-	return exec.Command("git", args...).Run()
+	cmd := exec.Command("git", args...)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 func (c *CLIClient) output(args ...string) (string, error) {
-	out, err := exec.Command("git", args...).Output()
+	cmd := exec.Command("git", args...)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
