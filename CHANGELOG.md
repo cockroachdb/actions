@@ -17,6 +17,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `pr-changelog-check` workflow: reusable workflow that validates CHANGELOG.md
+  changes in PRs, detects breaking changes, and posts status comments.
 - `autotag-from-changelog` now exposes `tag_created` and `tag` outputs so
   callers can react to whether a new tag was pushed.
 - `expect_step_output` test helper for asserting GitHub Actions step outputs.

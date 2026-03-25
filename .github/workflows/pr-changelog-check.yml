@@ -1,0 +1,99 @@
+name: PR Changelog Check
+
+on:
+  workflow_call:
+    inputs:
+      base-ref:
+        description: 'Base branch reference for diff comparison'
+        required: true
+        type: string
+      pr-number:
+        description: 'Pull request number'
+        required: true
+        type: number
+    outputs:
+      has_breaking:
+        description: 'Whether the PR contains breaking changes'
+        value: ${{ jobs.pr-changelog-check.outputs.has_breaking }}
+
+jobs:
+  pr-changelog-check:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    outputs:
+      has_breaking: ${{ steps.changelog-check.outputs.has_breaking }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Needed for diff mode
+          persist-credentials: false
+
+      # Resolve the ref of this reusable workflow so we can checkout the
+      # actions repo at the exact version the caller requested.
+      - name: Get workflow ref
+        id: workflow-ref
+        uses: cockroachdb/actions/get-workflow-ref@v0
+        with:
+          workflow_name: cockroachdb/actions/.github/workflows/pr-changelog-check.yml
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v6
+        with:
+          repository: cockroachdb/actions
+          ref: ${{ steps.workflow-ref.outputs.ref }}
+          path: actions-repo
+          persist-credentials: false
+
+      - name: Validate Changelog
+        id: changelog-check
+        uses: ./actions-repo/changelog-check
+        with:
+          check-mode: diff
+          base-ref: ${{ inputs.base-ref }}
+
+      - name: Find existing changelog comments
+        id: find-comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cids="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${{ inputs.pr-number }}/comments" \
+            --jq '[.[] | select((.body | contains("<!-- changelog-change-status -->")) and .user.login == "github-actions[bot]") | .id] | join(" ")')"
+
+          echo "comment-ids=$cids" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on breaking changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          COMMENT_IDS: ${{ steps.find-comments.outputs.comment-ids }}
+          HAS_BREAKING: ${{ steps.changelog-check.outputs.has_breaking }}
+        run: |
+          set -euo pipefail
+          marker='<!-- changelog-change-status -->'
+
+          if [[ "$HAS_BREAKING" == "true" ]]; then
+            msg='**This PR contains breaking changes.** Please ensure this is intentional and properly documented.'
+          else
+            msg='No breaking changes detected.'
+          fi
+
+          body_content="${marker}"$'\n'"${msg}"
+
+          if [[ -n "${COMMENT_IDS:-}" ]]; then
+            # Update all existing comments with the marker
+            for cid in $COMMENT_IDS; do
+              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" --raw-field "body=${body_content}"
+            done
+          else
+            # Create a new comment if none exist
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --raw-field "body=${body_content}"
+          fi
+
+      - name: Fail if invalid
+        if: steps.changelog-check.outputs.is_valid != 'true'
+        run: |
+          echo "::error::CHANGELOG validation failed. Please fix the CHANGELOG.md format."
+          exit 1
