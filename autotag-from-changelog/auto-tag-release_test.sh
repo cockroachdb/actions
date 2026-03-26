@@ -1,50 +1,22 @@
 #!/usr/bin/env bash
 # Tests for auto-tag-release.sh
 set -euo pipefail
-trap 'echo "Error occurred at line $LINENO"; exit 1' ERR
 
-SCRIPT_DIR="$(cd "$(dirname "$0")"; pwd)"
-PASS=0
-FAIL=0
-
-run_test() {
-  local name="$1"
-  local expected_exit="$2"
-  local expected_output="$3"
-  shift 3
-
-  local output exit_code
-  output=$("$@" 2>&1) && exit_code=0 || exit_code=$?
-
-  if [ "$exit_code" -ne "$expected_exit" ]; then
-    echo "FAIL: $name — expected exit $expected_exit, got $exit_code"
-    echo "  output: $output"
-    FAIL=$((FAIL + 1))
-    return
-  fi
-
-  if [ -n "$expected_output" ] && ! echo "$output" | grep -qF "$expected_output"; then
-    echo "FAIL: $name — expected output containing: $expected_output"
-    echo "  actual: $output"
-    FAIL=$((FAIL + 1))
-    return
-  fi
-
-  echo "PASS: $name"
-  PASS=$((PASS + 1))
-}
+cd "$(dirname "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(pwd)"
+source ../test_helpers.sh
 
 # Set up a temporary bare repo to act as "origin" and a working clone.
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-git config user.email || git config --global user.email "test@test.com"
-git config user.name || git config --global user.name "test"
-git init --bare --initial-branch=main "$TMPDIR/origin.git"
-git clone "$TMPDIR/origin.git" "$TMPDIR/work"
+git config user.email >/dev/null || git config --global user.email "test@test.com"
+git config user.name >/dev/null || git config --global user.name "test"
+git init --bare --initial-branch=main "$TMPDIR/origin.git" >/dev/null
+git clone "$TMPDIR/origin.git" "$TMPDIR/work" >/dev/null
 cd "$TMPDIR/work"
-git commit --allow-empty -m "initial"
-git push origin main
+git commit --allow-empty -m "initial" >/dev/null
+git push origin main >/dev/null
 
 # =============================================
 # parse_changelog unit tests
@@ -167,7 +139,7 @@ cat <<'EOF' > CHANGELOG.md
 ## [1.0.0] - 2026-01-01
 EOF
 
-run_test "content under [Unreleased], untagged version" 1 "is not tagged" \
+expect_failure_output "content under [Unreleased], untagged version" "is not tagged" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # --- Empty [Unreleased], new version, no existing tag — should tag ---
@@ -177,11 +149,11 @@ cat <<'EOF' > CHANGELOG.md
 ## [1.0.0] - 2026-01-01
 EOF
 
-run_test "creates new tag" 0 "Tagged v1.0.0 successfully" \
+expect_success_output "creates new tag" "Tagged v1.0.0 successfully" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # Verify the tag was actually created
-if git rev-parse v1.0.0; then
+if git rev-parse v1.0.0 >/dev/null; then
   echo "PASS: tag v1.0.0 exists"
   PASS=$((PASS + 1))
 else
@@ -190,7 +162,7 @@ else
 fi
 
 # --- Tag already exists — should skip ---
-run_test "tag already exists" 0 "already exists" \
+expect_success_output "tag already exists" "already exists" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # --- Content under [Unreleased], previous version already tagged — should pass ---
@@ -204,7 +176,7 @@ cat <<'EOF' > CHANGELOG.md
 ## [1.0.0] - 2026-01-01
 EOF
 
-run_test "content under [Unreleased], tagged version" 0 "already tagged" \
+expect_success_output "content under [Unreleased], tagged version" "already tagged" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # --- No version sections at all — should skip ---
@@ -212,7 +184,7 @@ cat <<'EOF' > CHANGELOG.md
 ## [Unreleased]
 EOF
 
-run_test "no released version" 0 "No released version" \
+expect_success_output "no released version" "No released version found" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # --- No [Unreleased] section — should skip ---
@@ -220,7 +192,7 @@ cat <<'EOF' > CHANGELOG.md
 ## [2.0.0] - 2026-01-01
 EOF
 
-run_test "no [Unreleased] section" 0 "No released version" \
+expect_success "no [Unreleased] section" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # --- [Unreleased] with only blank lines (no content) — should tag ---
@@ -232,10 +204,7 @@ cat <<'EOF' > CHANGELOG.md
 ## [2.0.0] - 2026-01-01
 EOF
 
-run_test "blank lines under [Unreleased]" 0 "Tagged v2.0.0 successfully" \
+expect_success "blank lines under [Unreleased]" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
-# --- Summary ---
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ] || exit 1
+print_results

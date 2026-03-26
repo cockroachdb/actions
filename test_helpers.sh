@@ -4,12 +4,35 @@
 # Usage:
 #   source test_helpers.sh
 #   expect_success "test name" command [args...]
-#   expect_failure "test name" "expected output substring" command [args...]
+#   expect_success_output "test name" "expected output" command [args...]
 #   expect_failure "test name" command [args...]
+#   expect_failure_output "test name" "expected output" command [args...]
 #   print_results
 
 PASS=0
 FAIL=0
+
+# Assert that input contains a given substring.
+# Usage: check_contains "expected" "$file"   (reads file)
+#        cmd | check_contains "expected"     (reads stdin)
+check_contains() {
+  if [ $# -ge 2 ]; then
+    grep --quiet --fixed-strings -- "$1" "$2"
+  else
+    grep --quiet --fixed-strings -- "$1"
+  fi
+}
+
+# Assert that input matches a given regex pattern.
+# Usage: check_contains_pattern "^prefix" "$file"   (reads file)
+#        cmd | check_contains_pattern "^prefix"      (reads stdin)
+check_contains_pattern() {
+  if [ $# -ge 2 ]; then
+    grep --quiet -- "$1" "$2"
+  else
+    grep --quiet -- "$1"
+  fi
+}
 
 _run_test() {
   local name="$1"
@@ -34,7 +57,7 @@ _run_test() {
     return
   fi
 
-  if [ -n "$expected_output" ] && ! echo "$output" | grep -qF "$expected_output"; then
+  if [ -n "$expected_output" ] && ! printf '%s\n' "$output" | grep --quiet --fixed-strings -- "$expected_output"; then
     echo "FAIL: $name — expected output containing: $expected_output"
     echo "  actual: $output"
     FAIL=$((FAIL + 1))
@@ -52,15 +75,26 @@ expect_success() {
   _run_test "$name" 0 "" "$@"
 }
 
-# expect_failure "test name" ["expected output substring"] command [args...]
-# Asserts the command exits non-zero. If the second arg is not a valid command,
-# it is treated as an expected output substring.
+# expect_success_output "test name" "expected output substring" command [args...]
+# Asserts the command exits 0 and output contains the expected substring.
+expect_success_output() {
+  local name="$1"; shift
+  local expected_output="$1"; shift
+  _run_test "$name" 0 "$expected_output" "$@"
+}
+
+# expect_failure "test name" command [args...]
+# Asserts the command exits non-zero.
 expect_failure() {
   local name="$1"; shift
-  local expected_output=""
-  if ! command -v "$1" >/dev/null 2>&1 && ! declare -F "$1" >/dev/null 2>&1; then
-    expected_output="$1"; shift
-  fi
+  _run_test "$name" "nonzero" "" "$@"
+}
+
+# expect_failure_output "test name" "expected output substring" command [args...]
+# Asserts the command exits non-zero and output contains the expected substring.
+expect_failure_output() {
+  local name="$1"; shift
+  local expected_output="$1"; shift
   _run_test "$name" "nonzero" "$expected_output" "$@"
 }
 

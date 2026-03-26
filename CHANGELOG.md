@@ -8,6 +8,11 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+### Added
+
+- Shared shell helpers (`actions_helpers.sh`) and test framework (`test_helpers.sh`)
+  for consistent logging, output handling, and test assertions across actions.
+
 ## [0.1.0] - 2026-03-23
 
 ### Added
