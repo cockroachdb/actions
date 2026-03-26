@@ -11,11 +11,16 @@
 # not tagged) and the script fails.
 set -euo pipefail
 
+ORIG_DIR="$(pwd)"
+cd "$(dirname "${BASH_SOURCE[0]}")"
+source ../actions_helpers.sh
+cd "$ORIG_DIR"
+
 changelog="${CHANGELOG_PATH:-CHANGELOG.md}"
 
 # Check that the changelog file exists and is readable.
 if [ ! -r "$changelog" ]; then
-  echo "::error::Changelog file '$changelog' does not exist or is not readable."
+  log_error "Changelog file '$changelog' does not exist or is not readable."
   exit 1
 fi
 # Parse the changelog to extract the unreleased content and latest version.
@@ -68,7 +73,7 @@ if [ -n "$unreleased_content" ]; then
     echo "Content under [Unreleased] and ${tag} already tagged, nothing to do."
     exit 0
   else
-    echo "::error::CHANGELOG.md has content under [Unreleased] but ${tag} is not tagged. Tag the previous release before adding new entries."
+    log_error "CHANGELOG.md has content under [Unreleased] but ${tag} is not tagged. Tag the previous release before adding new entries."
     exit 1
   fi
 fi

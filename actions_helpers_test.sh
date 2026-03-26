@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Tests for actions_helpers.sh helpers.
 set -euo pipefail
-trap 'echo "Error occurred at line $LINENO"; exit 1' ERR
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source ./test_helpers.sh
@@ -39,7 +38,7 @@ test_set_output() {
   GITHUB_OUTPUT="$TMPDIR_TEST/gh_out_single"
   touch "$GITHUB_OUTPUT"
   set_output "mykey" "myvalue"
-  grep -q 'mykey=myvalue' "$GITHUB_OUTPUT"
+  check_contains 'mykey=myvalue' "$GITHUB_OUTPUT"
 }
 expect_success "set_output: writes key=value" test_set_output
 
@@ -47,7 +46,7 @@ test_set_output_empty_value() {
   GITHUB_OUTPUT="$TMPDIR_TEST/gh_out_empty"
   touch "$GITHUB_OUTPUT"
   set_output "mykey" ""
-  grep -q 'mykey=$' "$GITHUB_OUTPUT"
+  check_contains 'mykey=' "$GITHUB_OUTPUT"
 }
 expect_success "set_output: handles empty value" test_set_output_empty_value
 
@@ -58,7 +57,7 @@ test_set_output_multiline() {
   touch "$GITHUB_OUTPUT"
   set_output_multiline "desc" "line one
 line two"
-  grep -q 'line one' "$GITHUB_OUTPUT" && grep -q 'line two' "$GITHUB_OUTPUT"
+  check_contains 'line one' "$GITHUB_OUTPUT" && check_contains 'line two' "$GITHUB_OUTPUT"
 }
 expect_success "set_output_multiline: writes multiline content" test_set_output_multiline
 
@@ -67,7 +66,7 @@ test_set_output_multiline_delimiters() {
   touch "$GITHUB_OUTPUT"
   set_output_multiline "desc" "content"
   # Should have opening delimiter (desc<<GHEOF_...) and closing delimiter (GHEOF_...)
-  grep -q '^desc<<GHEOF_' "$GITHUB_OUTPUT" && grep -q '^GHEOF_' "$GITHUB_OUTPUT"
+  check_contains_pattern '^desc<<GHEOF_' "$GITHUB_OUTPUT" && check_contains_pattern '^GHEOF_' "$GITHUB_OUTPUT"
 }
 expect_success "set_output_multiline: uses GHEOF delimiters" test_set_output_multiline_delimiters
 
@@ -75,8 +74,16 @@ test_set_output_multiline_empty() {
   GITHUB_OUTPUT="$TMPDIR_TEST/gh_out_multi_empty"
   touch "$GITHUB_OUTPUT"
   set_output_multiline "desc" ""
-  grep -q '^desc<<GHEOF_' "$GITHUB_OUTPUT"
+  check_contains_pattern '^desc<<GHEOF_' "$GITHUB_OUTPUT"
 }
 expect_success "set_output_multiline: handles empty value" test_set_output_multiline_empty
+
+# --- require_command tests ---
+
+test_require_command_found() { require_command bash; }
+expect_success "require_command: finds bash" test_require_command_found
+
+test_require_command_missing() { require_command nonexistent_cmd_xyz; }
+expect_failure "require_command: fails for missing command" test_require_command_missing
 
 print_results
