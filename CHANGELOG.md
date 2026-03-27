@@ -10,6 +10,9 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `github-issue-autosolve` reusable workflow: turnkey GitHub Issues
+  integration composing assess + implement with issue comments, label
+  management, and concurrency control.
 - `autosolve/assess` action: evaluate tasks for automated resolution suitability
   using Claude in read-only mode.
 - `autosolve/implement` action: autonomously implement solutions, validate
