@@ -1,0 +1,42 @@
+name: Get Workflow Ref
+description: >
+  Resolve the ref that a caller used to invoke a reusable workflow from this
+  repo. Parses the caller's workflow file — no API calls or extra permissions
+  needed.
+
+inputs:
+  workflow_name:
+    description: >
+      Substring to match in the caller's uses line (e.g.
+      "cockroachdb/actions/.github/workflows/github-issue-autosolve.yml").
+    required: true
+
+outputs:
+  ref:
+    description: The ref (tag, branch, or SHA) from the caller's uses line.
+    value: ${{ steps.resolve.outputs.ref }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout caller workflows
+      uses: actions/checkout@v6
+      with:
+        sparse-checkout: .github/workflows
+        persist-credentials: false
+        path: __get-workflow-ref
+
+    - name: Resolve ref from caller workflow
+      id: resolve
+      shell: bash
+      working-directory: __get-workflow-ref
+      run: bash "$GITHUB_ACTION_PATH/resolve_ref.sh"
+      env:
+        WORKFLOW_REF: ${{ github.workflow_ref }}
+        REPO: ${{ github.repository }}
+        REF: ${{ github.ref }}
+        WORKFLOW_NAME: ${{ inputs.workflow_name }}
+
+    - name: Cleanup
+      shell: bash
+      run: rm -rf __get-workflow-ref

@@ -10,6 +10,9 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `get-workflow-ref` action: resolve the ref a caller used to invoke a reusable
+  workflow by parsing the caller's workflow file — no API calls or extra
+  permissions needed.
 - Shared shell helpers (`actions_helpers.sh`) and test framework (`test_helpers.sh`)
   for consistent logging, output handling, and test assertions across actions.
 
