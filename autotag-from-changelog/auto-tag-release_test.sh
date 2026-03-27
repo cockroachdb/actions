@@ -161,6 +161,22 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# Verify the major tag v1 was created and points to v1.0.0
+if git rev-parse v1 >/dev/null; then
+  v1_commit=$(git rev-parse v1)
+  v1_0_0_commit=$(git rev-parse v1.0.0)
+  if [ "$v1_commit" = "$v1_0_0_commit" ]; then
+    echo "PASS: major tag v1 exists and points to v1.0.0"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: major tag v1 does not point to v1.0.0"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  echo "FAIL: major tag v1 was not created"
+  FAIL=$((FAIL + 1))
+fi
+
 # --- Tag already exists — should skip ---
 expect_success_output "tag already exists" "already exists" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
@@ -206,5 +222,52 @@ EOF
 
 expect_success "blank lines under [Unreleased]" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+
+# --- Major tag update: v2.1.0 should update v2 to point to new version ---
+cat <<'EOF' > CHANGELOG.md
+## [Unreleased]
+
+## [2.1.0] - 2026-03-01
+EOF
+
+expect_success_output "major tag updated" "::notice::Updated v2 successfully" \
+  env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+
+# Verify v2 now points to v2.1.0, not v2.0.0
+v2_commit=$(git rev-parse v2)
+v2_1_0_commit=$(git rev-parse v2.1.0)
+if [ "$v2_commit" = "$v2_1_0_commit" ]; then
+  echo "PASS: major tag v2 updated to point to v2.1.0"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: major tag v2 does not point to v2.1.0"
+  FAIL=$((FAIL + 1))
+fi
+
+# --- Different major version: v3.0.0 should create v3 tag ---
+cat <<'EOF' > CHANGELOG.md
+## [Unreleased]
+
+## [3.0.0] - 2026-03-15
+EOF
+
+expect_success_output "new major version" "::notice::Updated v3 successfully" \
+  env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+
+# Verify v3 exists and points to v3.0.0
+if git rev-parse v3 >/dev/null; then
+  v3_commit=$(git rev-parse v3)
+  v3_0_0_commit=$(git rev-parse v3.0.0)
+  if [ "$v3_commit" = "$v3_0_0_commit" ]; then
+    echo "PASS: major tag v3 exists and points to v3.0.0"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: major tag v3 does not point to v3.0.0"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  echo "FAIL: major tag v3 was not created"
+  FAIL=$((FAIL + 1))
+fi
 
 print_results
