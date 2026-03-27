@@ -6,6 +6,29 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(pwd)"
 source ../test_helpers.sh
 
+# Helper function to verify a major tag points to a specific semver tag.
+verify_major_tag_points_to() {
+  local major_tag="$1"
+  local semver_tag="$2"
+
+  if git rev-parse "$major_tag" >/dev/null; then
+    local major_commit
+    local semver_commit
+    major_commit=$(git rev-parse "$major_tag")
+    semver_commit=$(git rev-parse "$semver_tag")
+    if [ "$major_commit" = "$semver_commit" ]; then
+      echo "PASS: major tag $major_tag exists and points to $semver_tag"
+      PASS=$((PASS + 1))
+    else
+      echo "FAIL: major tag $major_tag does not point to $semver_tag"
+      FAIL=$((FAIL + 1))
+    fi
+  else
+    echo "FAIL: major tag $major_tag was not created"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 # Set up a temporary bare repo to act as "origin" and a working clone.
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
@@ -162,20 +185,7 @@ else
 fi
 
 # Verify the major tag v1 was created and points to v1.0.0
-if git rev-parse v1 >/dev/null; then
-  v1_commit=$(git rev-parse v1)
-  v1_0_0_commit=$(git rev-parse v1.0.0)
-  if [ "$v1_commit" = "$v1_0_0_commit" ]; then
-    echo "PASS: major tag v1 exists and points to v1.0.0"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL: major tag v1 does not point to v1.0.0"
-    FAIL=$((FAIL + 1))
-  fi
-else
-  echo "FAIL: major tag v1 was not created"
-  FAIL=$((FAIL + 1))
-fi
+verify_major_tag_points_to v1 v1.0.0
 
 # --- Tag already exists — should skip ---
 expect_success_output "tag already exists" "already exists" \
@@ -234,15 +244,7 @@ expect_success_output "major tag updated" "::notice::Updated v2 successfully" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # Verify v2 now points to v2.1.0, not v2.0.0
-v2_commit=$(git rev-parse v2)
-v2_1_0_commit=$(git rev-parse v2.1.0)
-if [ "$v2_commit" = "$v2_1_0_commit" ]; then
-  echo "PASS: major tag v2 updated to point to v2.1.0"
-  PASS=$((PASS + 1))
-else
-  echo "FAIL: major tag v2 does not point to v2.1.0"
-  FAIL=$((FAIL + 1))
-fi
+verify_major_tag_points_to v2 v2.1.0
 
 # --- Different major version: v3.0.0 should create v3 tag ---
 cat <<'EOF' > CHANGELOG.md
@@ -255,19 +257,6 @@ expect_success_output "new major version" "::notice::Updated v3 successfully" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
 
 # Verify v3 exists and points to v3.0.0
-if git rev-parse v3 >/dev/null; then
-  v3_commit=$(git rev-parse v3)
-  v3_0_0_commit=$(git rev-parse v3.0.0)
-  if [ "$v3_commit" = "$v3_0_0_commit" ]; then
-    echo "PASS: major tag v3 exists and points to v3.0.0"
-    PASS=$((PASS + 1))
-  else
-    echo "FAIL: major tag v3 does not point to v3.0.0"
-    FAIL=$((FAIL + 1))
-  fi
-else
-  echo "FAIL: major tag v3 was not created"
-  FAIL=$((FAIL + 1))
-fi
+verify_major_tag_points_to v3 v3.0.0
 
 print_results
