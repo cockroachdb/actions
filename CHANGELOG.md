@@ -8,6 +8,13 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+### Changed
+
+- `autotag-from-changelog` action: now automatically creates and updates major
+  version tags (e.g., `v1`) when pushing semver tags (e.g., `v1.2.3`), allowing
+  users to reference actions using major version tags that always point to the
+  latest release.
+
 ### Added
 
 - `get-workflow-ref` action: resolve the ref a caller used to invoke a reusable

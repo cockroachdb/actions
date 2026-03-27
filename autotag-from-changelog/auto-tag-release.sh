@@ -87,3 +87,12 @@ echo "Creating tag ${tag}..."
 git tag "$tag"
 git push origin "$tag"
 echo "Tagged ${tag} successfully."
+
+# Extract major version from semver tag (e.g., v1.2.3 -> v1)
+if [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+  major_tag="v${BASH_REMATCH[1]}"
+  log_notice "Updating major tag ${major_tag} to point to ${tag}"
+  git tag --force "$major_tag"
+  git push --force origin "$major_tag"
+  log_notice "Updated ${major_tag} successfully"
+fi
