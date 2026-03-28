@@ -4,10 +4,18 @@ inputs:
   changelog-path:
     description: Path to the changelog file
     default: CHANGELOG.md
+outputs:
+  tag_created:
+    description: Whether a new tag was created ("true" or "false")
+    value: ${{ steps.autotag.outputs.tag_created }}
+  tag:
+    description: The tag that was created (empty if no tag was created)
+    value: ${{ steps.autotag.outputs.tag }}
 runs:
   using: composite
   steps:
-    - shell: bash
+    - id: autotag
+      shell: bash
       env:
         CHANGELOG_PATH: ${{ inputs.changelog-path }}
       run: ${{ github.action_path }}/auto-tag-release.sh
