@@ -61,6 +61,9 @@ sources `test_helpers.sh` and validates behavior.
   production scripts. Run each command on its own line so that `bash -e`
   (the default for GitHub Actions `run` steps) halts on failure and the
   return code is checked automatically.
+- Use snake_case for multi-word action output names (e.g., `tag_created`
+  instead of `tag-created`). Hyphens in output names are parsed as subtraction
+  in GitHub Actions expressions.
 - In workflow YAML files, always look up and use the latest major version of
   built-in GitHub Actions (e.g., `actions/checkout`, `actions/upload-artifact`).
   Do not rely on memorized version numbers — they go stale.
@@ -70,3 +73,7 @@ sources `test_helpers.sh` and validates behavior.
   on error paths without logging or returning the error. If ignoring an
   error is genuinely correct (e.g., best-effort cleanup), add a comment
   explaining why it's safe to ignore.
+
+## Commit messages
+- If a commit updates or adds a specific action, prefix the commit with that
+  action. 
