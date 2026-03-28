@@ -70,3 +70,7 @@ sources `test_helpers.sh` and validates behavior.
   on error paths without logging or returning the error. If ignoring an
   error is genuinely correct (e.g., best-effort cleanup), add a comment
   explaining why it's safe to ignore.
+
+## Commit messages
+- If a commit updates or adds a specific action, prefix the commit with that
+  action. 

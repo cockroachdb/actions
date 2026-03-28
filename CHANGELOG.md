@@ -10,6 +10,9 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `autotag-from-changelog` now exposes `tag-created` and `tag` outputs so
+  callers can react to whether a new tag was pushed.
+- `expect_output` test helper for asserting GitHub Actions step outputs.
 - `get-workflow-ref` action: resolve the ref a caller used to invoke a reusable
   workflow by parsing the caller's workflow file — no API calls or extra
   permissions needed.

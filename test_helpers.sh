@@ -98,6 +98,22 @@ expect_failure_output() {
   _run_test "$name" "nonzero" "$expected_output" "$@"
 }
 
+# expect_output "test name" "key" "expected_value"
+# Asserts that GITHUB_OUTPUT contains key=expected_value.
+# Checks the last occurrence of the key so tests that reuse the same file work.
+expect_output() {
+  local name="$1" key="$2" expected="$3"
+  local actual
+  actual=$(grep --fixed-strings "${key}=" "${GITHUB_OUTPUT}" | tail -1 | cut -d= -f2-)
+  if [ "$actual" = "$expected" ]; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name — expected output $key=$expected, got '$actual'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 print_results() {
   echo ""
   echo "Results: $PASS passed, $FAIL failed"
