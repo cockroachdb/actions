@@ -52,6 +52,7 @@ parse_changelog "$changelog"
 # Check if the version string is empty.
 if [ -z "$version" ]; then
   echo "No released version found in CHANGELOG.md, skipping."
+  set_output "tag-created" "false"
   exit 0
 fi
 
@@ -71,6 +72,7 @@ if [ -n "$unreleased_content" ]; then
   # be tagged — if it isn't, something went wrong.
   if [ "$tag_exists" = true ]; then
     echo "Content under [Unreleased] and ${tag} already tagged, nothing to do."
+    set_output "tag-created" "false"
     exit 0
   else
     log_error "CHANGELOG.md has content under [Unreleased] but ${tag} is not tagged. Tag the previous release before adding new entries."
@@ -80,6 +82,7 @@ fi
 
 if [ "$tag_exists" = true ]; then
   echo "Tag ${tag} already exists, nothing to do."
+  set_output "tag-created" "false"
   exit 0
 fi
 
@@ -87,3 +90,5 @@ echo "Creating tag ${tag}..."
 git tag "$tag"
 git push origin "$tag"
 echo "Tagged ${tag} successfully."
+set_output "tag-created" "true"
+set_output "tag" "$tag"

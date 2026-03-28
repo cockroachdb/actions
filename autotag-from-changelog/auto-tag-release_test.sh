@@ -128,6 +128,9 @@ run_parse_test "parse: content before unreleased is ignored" "0.9.0" "true" CHAN
 # Integration tests
 # =============================================
 
+GITHUB_OUTPUT="$TMPDIR/github_output"
+export GITHUB_OUTPUT
+
 # --- Content under [Unreleased], previous version not tagged — should fail ---
 cat <<'EOF' > CHANGELOG.md
 ## [Unreleased]
@@ -151,6 +154,8 @@ EOF
 
 expect_success_output "creates new tag" "Tagged v1.0.0 successfully" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+expect_output "creates new tag — tag-created output" "tag-created" "true"
+expect_output "creates new tag — tag output" "tag" "v1.0.0"
 
 # Verify the tag was actually created
 if git rev-parse v1.0.0 >/dev/null; then
@@ -164,6 +169,7 @@ fi
 # --- Tag already exists — should skip ---
 expect_success_output "tag already exists" "already exists" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+expect_output "tag already exists — tag-created output" "tag-created" "false"
 
 # --- Content under [Unreleased], previous version already tagged — should pass ---
 cat <<'EOF' > CHANGELOG.md
@@ -186,6 +192,7 @@ EOF
 
 expect_success_output "no released version" "No released version found" \
   env CHANGELOG_PATH=CHANGELOG.md "$SCRIPT_DIR/auto-tag-release.sh"
+expect_output "no released version — tag-created output" "tag-created" "false"
 
 # --- No [Unreleased] section — should skip ---
 cat <<'EOF' > CHANGELOG.md
