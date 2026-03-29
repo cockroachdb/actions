@@ -17,6 +17,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `pr-changelog-check` workflow: reusable workflow that validates CHANGELOG.md
+  changes in PRs, detects breaking changes, and posts status comments.
 - `get-workflow-ref` action: resolve the ref a caller used to invoke a reusable
   workflow by parsing the caller's workflow file — no API calls or extra
   permissions needed.
