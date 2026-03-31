@@ -8,6 +8,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-31
+
 ### Changed
 
 - `autotag-from-changelog` action: now automatically creates and updates major
