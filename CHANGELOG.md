@@ -6,7 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Breaking changes are prefixed with "Breaking Change: ".
 
-## [Unreleased]
+### Added
+
+- `create-release-pr` reusable workflow: automates version bump PRs by checking for
+  unreleased changes in CHANGELOG, extracting the next version, updating
+  the CHANGELOG with new version and release date, optionally running custom update
+  scripts, and creating a PR from a fork to the upstream repository.
 
 ## [0.3.0] - 2026-04-02
 
