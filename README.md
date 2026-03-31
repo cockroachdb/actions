@@ -13,7 +13,7 @@ otherwise it succeeds even if `[Unreleased]` contains entries.
 **Usage:**
 
 ```yaml
-- uses: cockroachdb/actions/autotag-from-changelog@v1
+- uses: cockroachdb/actions/autotag-from-changelog@v0
 ```
 
 **Inputs:**
@@ -38,7 +38,7 @@ and detects breaking changes to enable automated version bump determination.
 **Usage:**
 
 ```yaml
-- uses: cockroachdb/actions/changelog-check@v1
+- uses: cockroachdb/actions/changelog-check@v0
   with:
     check-mode: diff
     base-ref: ${{ github.event.pull_request.base.ref }}
@@ -79,7 +79,7 @@ determine whether a major, minor, or patch version bump is needed.
 **Usage:**
 
 ```yaml
-- uses: cockroachdb/actions/release-version-extract@v1
+- uses: cockroachdb/actions/release-version-extract@v0
   id: version
 - run: echo "Next version will be ${{ steps.version.outputs.next_version }}"
 ```
@@ -92,12 +92,13 @@ determine whether a major, minor, or patch version bump is needed.
 
 **Outputs:**
 
-| Name              | Description                                                      |
-| ----------------- | ---------------------------------------------------------------- |
-| `current_version` | Current latest released version (empty if no releases)           |
-| `next_version`    | Suggested next version based on unreleased changes               |
-| `bump_type`       | Type of version bump (`major`/`minor`/`patch`/`initial`, or empty if no changes) |
-| `has_unreleased`  | Whether there are unreleased changes (`true`/`false`)            |
+| Name                 | Description                                                      |
+| -------------------- | ---------------------------------------------------------------- |
+| `current_version`    | Current latest released version (empty if no releases)           |
+| `next_version`       | Suggested next version based on unreleased changes               |
+| `bump_type`          | Type of version bump (`major`/`minor`/`patch`/`initial`, or empty if no changes) |
+| `has_unreleased`     | Whether there are unreleased changes (`true`/`false`)            |
+| `unreleased_changes` | Text content of unreleased changelog entries                     |
 
 **Features:**
 
@@ -106,6 +107,107 @@ determine whether a major, minor, or patch version bump is needed.
 - Handles initial releases (first release → 0.1.0)
 - Returns empty `bump_type` when there are no unreleased changes
 - Follows semantic versioning principles
+
+### get-workflow-ref
+
+Resolves the git ref that a caller used to invoke a reusable workflow by parsing
+the caller's workflow file. Useful for reusable workflows that need to reference
+other resources (actions, scripts, etc.) at the same version they were invoked with.
+
+**Usage:**
+
+```yaml
+jobs:
+  my-job:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: cockroachdb/actions/get-workflow-ref@v0
+        id: ref
+      - run: echo "Workflow was called with ref ${{ steps.ref.outputs.ref }}"
+```
+
+**Outputs:**
+
+| Name  | Description                                                      |
+| ----- | ---------------------------------------------------------------- |
+| `ref` | Git ref used to invoke this workflow (e.g., `v1`, `main`, commit SHA) |
+
+**Features:**
+
+- No API calls or extra permissions needed
+- Works by parsing the caller's workflow file from the event payload
+- Returns the exact ref specified in the workflow call (tag, branch, or SHA)
+
+## Workflows
+
+### create-release-pr
+
+Reusable workflow that automates version bump pull requests. Checks for unreleased
+changes in CHANGELOG.md, determines the next semantic version, updates the changelog
+with the release date, optionally runs custom update scripts, and creates a PR from
+a fork to the upstream repository.
+
+**Usage:**
+
+```yaml
+name: Create Version Bump PR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-release-pr:
+    uses: cockroachdb/actions/.github/workflows/create-release-pr.yml@v0
+    with:
+      fork_owner: my-release-bot
+      fork_repo: my-repo-fork
+      pr_base_branch: main
+      release_date: 2026-03-30
+      git_user_name: my-release-bot
+      git_user_email: my-release-bot@users.noreply.github.com
+      build_script: .github/scripts/build_script.sh
+      files_to_commit: |
+        package.json
+        package-lock.json
+    secrets:
+      fork_push_token: ${{ secrets.FORK_PAT }}
+      pr_create_token: ${{ secrets.PR_PAT }}
+```
+
+**Inputs:**
+
+| Name                        | Required | Default | Description                                      |
+| --------------------------- | -------- | ------- | ------------------------------------------------ |
+| `fork_owner`                | Yes      |         | GitHub username or org that owns the fork        |
+| `fork_repo`                 | Yes      |         | Repository name of the fork                      |
+| `pr_base_branch`            | No       | `""`    | Base branch for the PR (defaults to repository default branch) |
+| `build_script`              | No       | `""`    | Optional path to a bash script to execute before committing. The `VERSION` environment variable will be available. |
+| `files_to_commit`           | No       | `""`    | Newline-separated list of file paths to commit (in addition to CHANGELOG.md which is always included). Paths should be relative to repository root. |
+| `release_date`              | No       | `""`    | Release date in YYYY-MM-DD format (defaults to current date) |
+| `git_user_name`             | No       | `github-actions[bot]` | Git user name for commits |
+| `git_user_email`            | No       | `github-actions[bot]@users.noreply.github.com` | Git user email for commits |
+
+**Secrets:**
+
+| Name               | Required | Description                                      |
+| ------------------ | -------- | ------------------------------------------------ |
+| `fork_push_token`  | Yes      | PAT with push access to the fork                 |
+| `pr_create_token`  | Yes      | PAT with permission to create PRs on the upstream repo |
+
+**Outputs:**
+
+| Name     | Description                                                      |
+| -------- | ---------------------------------------------------------------- |
+| `pr_url` | URL of the created pull request (empty if no unreleased changes) |
+
+**Features:**
+
+- Automatically detects unreleased changes in CHANGELOG.md
+- Determines next version using semver principles
+- Updates CHANGELOG.md with new version and customizable release date (defaults to current date)
+- Supports custom bash scripts to run before committing (via `build_script` file path)
+- Creates PR from fork to upstream repository
+- Exits gracefully when no unreleased changes exist
 
 ## Development
 
