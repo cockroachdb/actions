@@ -19,6 +19,9 @@ outputs:
   has_unreleased:
     description: Whether there are unreleased changes (true/false)
     value: ${{ steps.check-unreleased.outputs.has_changes }}
+  unreleased_changes:
+    description: Unreleased changelog entries text
+    value: ${{ steps.check-unreleased.outputs.changes }}
 
 runs:
   using: composite
@@ -62,9 +65,11 @@ runs:
         source ${{ github.action_path }}/../actions_helpers.sh
         if [ -z "$CHANGES" ] || [ "$CHANGES" = "null" ] || [ "$CHANGES" = "" ]; then
           set_output "has_changes" "false"
+          set_output "changes" ""
           log_notice "No unreleased changes found"
         else
           set_output "has_changes" "true"
+          set_output_multiline "changes" "$CHANGES"
           log_notice "Unreleased changes found"
         fi
 

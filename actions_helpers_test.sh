@@ -86,4 +86,75 @@ expect_success "require_command: finds bash" test_require_command_found
 test_require_command_missing() { require_command nonexistent_cmd_xyz; }
 expect_failure "require_command: fails for missing command" test_require_command_missing
 
+# --- get_base_branch tests ---
+
+test_get_base_branch_provided() {
+  local result
+  result=$(get_base_branch "my-branch" "owner/repo" 2>&1)
+  echo "$result" | check_contains "my-branch"
+}
+expect_success "get_base_branch: returns provided branch" test_get_base_branch_provided
+
+test_get_base_branch_parses_github_json_develop() {
+  # Mock gh to return actual GitHub API JSON format (verified format)
+  # This tests the jq parsing: .defaultBranchRef.name
+  gh() {
+    if [[ "$*" == *"repo view"* ]]; then
+      echo '{"defaultBranchRef":{"name":"develop"}}'
+    fi
+  }
+  export -f gh
+
+  local result
+  result=$(get_base_branch "" "owner/repo" 2>&1)
+  echo "$result" | check_contains "develop"
+
+  unset -f gh
+}
+expect_success "get_base_branch: parses GitHub JSON for develop branch" test_get_base_branch_parses_github_json_develop
+
+test_get_base_branch_parses_github_json_null() {
+  # Test null defaultBranchRef (empty repo case)
+  gh() {
+    if [[ "$*" == *"repo view"* ]]; then
+      echo '{"defaultBranchRef":null}'
+    fi
+  }
+  export -f gh
+
+  local result
+  result=$(get_base_branch "" "owner/repo" 2>&1)
+  # jq outputs "null" as literal string, which should be treated as empty
+  echo "$result" | check_contains "main"
+
+  unset -f gh
+}
+expect_success "get_base_branch: handles null defaultBranchRef" test_get_base_branch_parses_github_json_null
+
+test_get_base_branch_parses_branch_with_slash() {
+  # Test branch names with slashes (e.g., release/v2.0)
+  gh() {
+    if [[ "$*" == *"repo view"* ]]; then
+      echo '{"defaultBranchRef":{"name":"release/v2.0"}}'
+    fi
+  }
+  export -f gh
+
+  local result
+  result=$(get_base_branch "" "owner/repo" 2>&1)
+  echo "$result" | check_contains "release/v2.0"
+
+  unset -f gh
+}
+expect_success "get_base_branch: handles branch names with slashes" test_get_base_branch_parses_branch_with_slash
+
+test_get_base_branch_gh_failure() {
+  # Test in a directory that's not a git repo - gh should fail
+  (
+    cd "$TMPDIR_TEST"
+    get_base_branch "" "owner/repo"
+  )
+}
+expect_failure "get_base_branch: fails when gh fails" test_get_base_branch_gh_failure
+
 print_results

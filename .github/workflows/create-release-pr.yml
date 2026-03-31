@@ -1,0 +1,195 @@
+name: Create Release PR
+
+on:
+  workflow_call:
+    inputs:
+      fork_owner:
+        description: GitHub username or org that owns the fork
+        required: true
+        type: string
+      fork_repo:
+        description: Repository name of the fork
+        required: true
+        type: string
+      pr_base_branch:
+        description: Base branch for the PR. Defaults to repository default branch
+        required: false
+        type: string
+        default: ""
+      build_script:
+        description: Optional path to a bash script to execute before committing. The VERSION environment variable will be available.
+        required: false
+        type: string
+        default: ""
+      files_to_commit:
+        description: Newline-separated list of file paths to commit (in addition to CHANGELOG.md which is always included). Paths should be relative to repository root.
+        required: false
+        type: string
+        default: ""
+      release_date:
+        description: Release date in YYYY-MM-DD format. Defaults to current date
+        required: false
+        type: string
+        default: ""
+      git_user_name:
+        description: Git user name for commits. Defaults to github-actions[bot]
+        required: false
+        type: string
+        default: "github-actions[bot]"
+      git_user_email:
+        description: Git user email for commits. Defaults to github-actions[bot]@users.noreply.github.com
+        required: false
+        type: string
+        default: "github-actions[bot]@users.noreply.github.com"
+    secrets:
+      fork_push_token:
+        description: PAT with push access to the fork
+        required: true
+      pr_create_token:
+        description: PAT with permission to create PRs on the upstream repo
+        required: true
+    outputs:
+      pr_url:
+        description: URL of the created pull request (empty if no unreleased changes)
+        value: ${{ jobs.create-release-pr.outputs.pr_url }}
+
+env:
+  # Directory name for the target repo checkout (side-by-side layout).
+  REPO_DIR: target-repo
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    outputs:
+      pr_url: ${{ steps.create-pr.outputs.pr_url }}
+    defaults:
+      run:
+        working-directory: ${{ env.REPO_DIR }}
+    steps:
+      - name: Get workflow ref
+        id: workflow-ref
+        uses: cockroachdb/actions/get-workflow-ref@v0
+        with:
+          workflow_name: cockroachdb/actions/.github/workflows/create-release-pr.yml
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v6
+        with:
+          repository: cockroachdb/actions
+          ref: ${{ steps.workflow-ref.outputs.ref }}
+          persist-credentials: false
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: ${{ env.REPO_DIR }}
+
+      - name: Extract release version
+        id: extract-version
+        uses: ./release-version-extract
+        with:
+          changelog-path: ${{ env.REPO_DIR }}/CHANGELOG.md
+
+      - name: Create branch
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        id: create-branch
+        run: |
+          source ../actions_helpers.sh
+
+          # Create branch
+          branch_name="automation/create-v${{ steps.extract-version.outputs.next_version }}"
+          log_notice "Creating new branch $branch_name"
+          git checkout -b "$branch_name"
+          set_output "branch_name" "$branch_name"
+
+      - name: Update CHANGELOG with new version
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        env:
+          VERSION: ${{ steps.extract-version.outputs.next_version }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+        run: ../.github/scripts/update_changelog.sh
+
+      - name: Run build script
+        if: steps.extract-version.outputs.has_unreleased == 'true' && inputs.build_script != ''
+        env:
+          VERSION: ${{ steps.extract-version.outputs.next_version }}
+          BUILD_SCRIPT: ${{ inputs.build_script }}
+        run: |
+          source ../actions_helpers.sh
+
+          log_notice "Running build script: $BUILD_SCRIPT"
+          bash -e "$BUILD_SCRIPT"
+
+      - name: Commit version update changes
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        id: commit-changes
+        env:
+          VERSION: ${{ steps.extract-version.outputs.next_version }}
+          FILES_TO_COMMIT: ${{ inputs.files_to_commit }}
+          UNRELEASED_CHANGES: ${{ steps.extract-version.outputs.unreleased_changes }}
+          GIT_USER_NAME: ${{ inputs.git_user_name }}
+          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+        run: |
+          # Configure git for commits
+          git config user.name "$GIT_USER_NAME"
+          git config user.email "$GIT_USER_EMAIL"
+
+          ../.github/scripts/commit_release_changes.sh
+
+      - name: Push branch to the remote
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        env:
+          FORK_PUSH_TOKEN: ${{ secrets.fork_push_token }}
+          FORK_OWNER: ${{ inputs.fork_owner }}
+          FORK_REPO: ${{ inputs.fork_repo }}
+        run: |
+          source ../actions_helpers.sh
+
+          # Configure git credentials for push
+          # Uses inline credential helper to inject PAT. Token is visible in process
+          # listings but this is acceptable only because GitHub Actions runs in ephemeral
+          # environments where no other users can see the process list.
+          git config --local credential.helper "!f() { echo \"username=$FORK_OWNER\"; echo \"password=\${FORK_PUSH_TOKEN}\"; }; f"
+
+          # Add fork remote
+          fork_url="https://github.com/$FORK_OWNER/$FORK_REPO.git"
+          log_notice "Adding fork remote at $fork_url"
+          git remote add fork "$fork_url"
+
+          branch_name="${{ steps.create-branch.outputs.branch_name }}"
+          git push fork "$branch_name"
+          log_notice "Pushed branch $branch_name to fork"
+
+      - name: Create release pull request
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.pr_create_token }}
+          PR_BASE_BRANCH: ${{ inputs.pr_base_branch }}
+          FORK_OWNER: ${{ inputs.fork_owner }}
+        run: |
+          source ../actions_helpers.sh
+
+          version="${{ steps.extract-version.outputs.next_version }}"
+
+          # Determine base branch
+          base_branch=$(get_base_branch "$PR_BASE_BRANCH" "${{ github.repository }}")
+          log_notice "Using base branch: $base_branch"
+
+          # Build PR body
+          pr_body="## Summary
+
+          This PR updates the version to \`${version}\` in preparation for release.
+
+          ### Changelog Entries
+
+          ${{ steps.extract-version.outputs.unreleased_changes }}"
+
+          # Create pull request
+          head="$FORK_OWNER:${{ steps.create-branch.outputs.branch_name }}"
+          pr_url=$(gh pr create --repo "${{ github.repository }}" --title "Release v${version}" --body "$pr_body" --base "$base_branch" --head "$head")
+
+          set_output "pr_url" "$pr_url"
+          log_notice "Pull request created successfully: $pr_url"
