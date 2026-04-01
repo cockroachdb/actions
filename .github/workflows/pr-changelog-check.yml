@@ -22,7 +22,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      pull-requests: write
     outputs:
       has_breaking: ${{ steps.changelog-check.outputs.has_breaking }}
     steps:
@@ -53,44 +52,6 @@ jobs:
         with:
           check-mode: diff
           base-ref: ${{ inputs.base-ref }}
-
-      - name: Find existing changelog comments
-        id: find-comments
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cids="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${{ inputs.pr-number }}/comments" \
-            --jq '[.[] | select((.body | contains("<!-- changelog-change-status -->")) and .user.login == "github-actions[bot]") | .id] | join(" ")')"
-
-          echo "comment-ids=$cids" >> "$GITHUB_OUTPUT"
-
-      - name: Comment on breaking changes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ inputs.pr-number }}
-          COMMENT_IDS: ${{ steps.find-comments.outputs.comment-ids }}
-          HAS_BREAKING: ${{ steps.changelog-check.outputs.has_breaking }}
-        run: |
-          set -euo pipefail
-          marker='<!-- changelog-change-status -->'
-
-          if [[ "$HAS_BREAKING" == "true" ]]; then
-            msg='**This PR contains breaking changes.** Please ensure this is intentional and properly documented.'
-          else
-            msg='No breaking changes detected.'
-          fi
-
-          body_content="${marker}"$'\n'"${msg}"
-
-          if [[ -n "${COMMENT_IDS:-}" ]]; then
-            # Update all existing comments with the marker
-            for cid in $COMMENT_IDS; do
-              gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${cid}" --raw-field "body=${body_content}"
-            done
-          else
-            # Create a new comment if none exist
-            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --raw-field "body=${body_content}"
-          fi
 
       - name: Fail if invalid
         if: steps.changelog-check.outputs.is_valid != 'true'
