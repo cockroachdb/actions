@@ -8,6 +8,11 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+### Changed
+
+- `pr-changelog-check` workflow: removed PR commenting functionality. The workflow
+  now only validates CHANGELOG.md and detects breaking changes without posting comments.
+
 ## [0.2.0] - 2026-03-31
 
 ### Changed
