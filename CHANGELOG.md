@@ -8,6 +8,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-02
+
 ### Changed
 
 - `pr-changelog-check` workflow: removed PR commenting functionality. The workflow
