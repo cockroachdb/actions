@@ -631,13 +631,22 @@ func aiSecurityReview(
 		resultText, positive, _ := claude.ExtractResult(outputFile, "SECURITY_REVIEW")
 		action.SaveLogArtifact(outputFile, fmt.Sprintf("security_review_%d.json", batchNum))
 		if result.ExitCode != 0 || resultText == "" {
+			// Best-effort unstage; safe to continue because the return
+			// below stops execution before any push can occur.
+			if err := gitClient.ResetHead(); err != nil {
+				action.LogWarning(fmt.Sprintf("failed to reset staged changes: %v", err))
+			}
 			return fmt.Errorf("AI security review batch %d did not produce a result (exit code %d)", batchNum, result.ExitCode)
 		}
 
 		if !positive {
 			action.LogWarning(fmt.Sprintf("AI security review found sensitive content in batch %d:", batchNum))
 			action.LogWarning(resultText)
-			_ = gitClient.ResetHead()
+			// Best-effort unstage; safe to continue because the return
+			// below stops execution before any push can occur.
+			if err := gitClient.ResetHead(); err != nil {
+				action.LogWarning(fmt.Sprintf("failed to reset staged changes: %v", err))
+			}
 			return fmt.Errorf("sensitive content detected in staged changes")
 		}
 
