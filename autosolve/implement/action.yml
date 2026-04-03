@@ -151,7 +151,7 @@ runs:
       id: implement
       shell: bash
       working-directory: ${{ inputs.working_directory }}
-      run: "$RUNNER_TEMP/autosolve" implement
+      run: $RUNNER_TEMP/autosolve implement
       env:
         INPUT_PROMPT: ${{ inputs.prompt }}
         INPUT_SKILL: ${{ inputs.skill }}

@@ -164,7 +164,7 @@ jobs:
           echo "exists=$exists" >> "$GITHUB_OUTPUT"
           echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
         env:
-          GH_TOKEN: ${{ secrets.pr_create_token }}
+          GH_TOKEN: ${{ secrets.repo_token }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
 
       - name: Comment that PR already exists
