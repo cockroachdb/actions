@@ -9,30 +9,13 @@
 #   expect_failure_output "test name" "expected output" command [args...]
 #   print_results
 
+# Source actions_helpers.sh to get check_contains and check_contains_pattern
+TEST_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=actions_helpers.sh
+source "$TEST_HELPERS_DIR/actions_helpers.sh"
+
 PASS=0
 FAIL=0
-
-# Assert that input contains a given substring.
-# Usage: check_contains "expected" "$file"   (reads file)
-#        cmd | check_contains "expected"     (reads stdin)
-check_contains() {
-  if [ $# -ge 2 ]; then
-    grep --quiet --fixed-strings -- "$1" "$2"
-  else
-    grep --quiet --fixed-strings -- "$1"
-  fi
-}
-
-# Assert that input matches a given regex pattern.
-# Usage: check_contains_pattern "^prefix" "$file"   (reads file)
-#        cmd | check_contains_pattern "^prefix"      (reads stdin)
-check_contains_pattern() {
-  if [ $# -ge 2 ]; then
-    grep --quiet -- "$1" "$2"
-  else
-    grep --quiet -- "$1"
-  fi
-}
 
 _run_test() {
   local name="$1"
@@ -57,7 +40,7 @@ _run_test() {
     return
   fi
 
-  if [ -n "$expected_output" ] && ! printf '%s\n' "$output" | grep --quiet --fixed-strings -- "$expected_output"; then
+  if [ -n "$expected_output" ] && ! printf '%s\n' "$output" | check_contains "$expected_output"; then
     echo "FAIL: $name — expected output containing: $expected_output"
     echo "  actual: $output"
     FAIL=$((FAIL + 1))
@@ -109,7 +92,7 @@ expect_step_output() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if grep --quiet --fixed-strings "${key}=" "${GITHUB_OUTPUT}"; then
+  if check_contains "${key}=" "${GITHUB_OUTPUT}"; then
     actual=$(grep --fixed-strings "${key}=" "${GITHUB_OUTPUT}" | tail -1 | cut -d= -f2-)
   fi
   if [ "$actual" = "$expected" ]; then
@@ -119,6 +102,94 @@ expect_step_output() {
     echo "FAIL: $name — expected output $key=$expected, got '$actual'"
     FAIL=$((FAIL + 1))
   fi
+}
+
+# expect_files_in_commit file1 [file2 ...]
+# Asserts that all listed files are in the last commit
+expect_files_in_commit() {
+  for file in "$@"; do
+    if ! git diff --name-only HEAD~1 HEAD | grep --quiet --fixed-strings --line-regexp "$file"; then
+      echo "Expected $file to be in commit, but it wasn't" >&2
+      return 1
+    fi
+  done
+}
+
+# expect_files_not_in_commit file1 [file2 ...]
+# Asserts that none of the listed files are in the last commit
+expect_files_not_in_commit() {
+  for file in "$@"; do
+    if git diff --name-only HEAD~1 HEAD | grep --quiet --fixed-strings --line-regexp "$file"; then
+      echo "Expected $file NOT to be in commit, but it was" >&2
+      return 1
+    fi
+  done
+}
+
+# expect_diff "test name" original_content expected_diff transformation_command
+# Runs transformation_command on original_content and verifies the diff contains expected_diff.
+#
+# Example:
+#   expect_diff "adds version header" \
+#     "## [Unreleased]\n- Change" \
+#     "## [1.0.0] - 2026-04-04" \
+#     test_update_changelog "1.0.0" "2026-04-04"
+expect_diff() {
+  local name="$1" original="$2" expected_diff="$3"
+  shift 3
+
+  # Create temp directory for before/after comparison
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  # Write original content to file
+  echo "$original" > "$tmpdir/before"
+
+  # Run transformation command and capture output
+  local output exit_code
+  output=$("$@" 2>&1)
+  exit_code=$?
+
+  # Fail if transformation command failed
+  if [ "$exit_code" -ne 0 ]; then
+    echo "FAIL: $name — command failed with exit code $exit_code"
+    echo "  output: $output"
+    FAIL=$((FAIL + 1))
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  # Write transformed content to file
+  echo "$output" > "$tmpdir/after"
+
+  # Generate unified diff
+  # diff exits with 0 (identical), 1 (differ), or 2 (error)
+  local actual_diff diff_exit
+  actual_diff=$(diff --unified "$tmpdir/before" "$tmpdir/after" 2>&1) && diff_exit=0 || diff_exit=$?
+
+  # Exit code 2 means error (not just files differing)
+  if [ "$diff_exit" -eq 2 ]; then
+    echo "FAIL: $name — diff command failed"
+    echo "  diff error: $actual_diff"
+    FAIL=$((FAIL + 1))
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  # Check if diff contains the expected string (exact match, not regex)
+  if echo "$actual_diff" | check_contains "$expected_diff"; then
+    echo "PASS: $name"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: $name — diff doesn't contain expected string"
+    echo "  expected to find: $expected_diff"
+    echo "  actual diff:"
+    echo "$actual_diff"
+    FAIL=$((FAIL + 1))
+  fi
+
+  # Clean up temp directory
+  rm -rf "$tmpdir"
 }
 
 print_results() {
