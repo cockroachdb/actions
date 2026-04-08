@@ -8,6 +8,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `autotag-from-changelog` action: add `create-major-tag` input (default `true`) to
+  control whether major version tags (e.g., `v1`) are created alongside semver tags.
 - `create-release-pr` reusable workflow: automates version bump PRs by checking for
   unreleased changes in CHANGELOG, extracting the next version, updating
   the CHANGELOG with new version and release date, optionally running custom update

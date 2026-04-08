@@ -4,6 +4,9 @@ inputs:
   changelog-path:
     description: Path to the changelog file
     default: CHANGELOG.md
+  create-major-tag:
+    description: Create/update major version tag (e.g., v1 for v1.2.3). Accepted values are "true" or "false" (case-insensitive).
+    default: "true"
 outputs:
   tag_created:
     description: Whether a new tag was created ("true" or "false")
@@ -18,4 +21,5 @@ runs:
       shell: bash
       env:
         CHANGELOG_PATH: ${{ inputs.changelog-path }}
+        CREATE_MAJOR_TAG: ${{ inputs.create-major-tag }}
       run: ${{ github.action_path }}/auto-tag-release.sh

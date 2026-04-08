@@ -17,6 +17,20 @@ source ../actions_helpers.sh
 cd "$ORIG_DIR"
 
 changelog="${CHANGELOG_PATH:-CHANGELOG.md}"
+# Default to "true" when unset; reject empty strings and invalid values.
+# Using ${VAR+x} instead of [[ -v VAR ]] for bash 3.2 (macOS) compatibility.
+if [[ "${CREATE_MAJOR_TAG+x}" != "x" ]]; then
+  create_major_tag="true"
+elif [[ -z "$CREATE_MAJOR_TAG" ]]; then
+  log_error "Invalid value for create-major-tag: ''. Expected 'true' or 'false'."
+  exit 1
+else
+  create_major_tag=$(echo "$CREATE_MAJOR_TAG" | tr '[:upper:]' '[:lower:]')
+fi
+if [[ "$create_major_tag" != "true" && "$create_major_tag" != "false" ]]; then
+  log_error "Invalid value for create-major-tag: '${CREATE_MAJOR_TAG}'. Expected 'true' or 'false'."
+  exit 1
+fi
 
 # Check that the changelog file exists and is readable.
 if [ ! -r "$changelog" ]; then
@@ -92,7 +106,7 @@ git push origin "$tag"
 echo "Tagged ${tag} successfully."
 
 # Extract major version from semver tag (e.g., v1.2.3 -> v1)
-if [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
+if [ "$create_major_tag" = "true" ] && [[ "$tag" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+ ]]; then
   major_tag="v${BASH_REMATCH[1]}"
   log_notice "Updating major tag ${major_tag} to point to ${tag}"
   git tag --force "$major_tag"
