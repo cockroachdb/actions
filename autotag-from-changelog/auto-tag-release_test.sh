@@ -269,4 +269,43 @@ expect_success_output "new major version" "::notice::Updated v3 successfully" \
 # Verify v3 exists and points to v3.0.0
 verify_major_tag_points_to v3 v3.0.0
 
+# --- create-major-tag invalid value — should fail ---
+expect_failure_output "invalid create-major-tag value" "Invalid value for create-major-tag" \
+  env CHANGELOG_PATH=CHANGELOG.md CREATE_MAJOR_TAG=yes "$SCRIPT_DIR/auto-tag-release.sh"
+
+# --- create-major-tag empty string — should fail ---
+expect_failure_output "empty create-major-tag value" "Invalid value for create-major-tag" \
+  env CHANGELOG_PATH=CHANGELOG.md CREATE_MAJOR_TAG="" "$SCRIPT_DIR/auto-tag-release.sh"
+
+# --- create-major-tag=false: should create semver tag but skip major tag ---
+cat <<'EOF' > CHANGELOG.md
+## [Unreleased]
+
+## [4.0.0] - 2026-04-01
+EOF
+
+: > "$GITHUB_OUTPUT"
+expect_success_output "skip major tag" "Tagged v4.0.0 successfully" \
+  env CHANGELOG_PATH=CHANGELOG.md CREATE_MAJOR_TAG=false "$SCRIPT_DIR/auto-tag-release.sh"
+expect_step_output "skip major tag — tag_created output" "tag_created" "true"
+expect_step_output "skip major tag — tag output" "tag" "v4.0.0"
+
+# Verify semver tag was created but major tag was NOT
+if git rev-parse v4.0.0 >/dev/null; then
+  echo "PASS: tag v4.0.0 exists"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: tag v4.0.0 was not created"
+  FAIL=$((FAIL + 1))
+fi
+
+# Merge stderr into stdout — git rev-parse prints an error when the tag doesn't exist.
+if git rev-parse v4 >/dev/null 2>&1; then
+  echo "FAIL: major tag v4 should not have been created"
+  FAIL=$((FAIL + 1))
+else
+  echo "PASS: major tag v4 was not created"
+  PASS=$((PASS + 1))
+fi
+
 print_results
