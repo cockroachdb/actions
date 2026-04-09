@@ -31,6 +31,9 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `github-issue-autosolve` reusable workflow: turnkey GitHub Issues
+  integration composing assess + implement with issue comments, label
+  management, and concurrency control.
 - `pr-changelog-check` workflow: reusable workflow that validates CHANGELOG.md
   changes in PRs, detects breaking changes, and posts status comments.
 - `autotag-from-changelog` now exposes `tag_created` and `tag` outputs so
