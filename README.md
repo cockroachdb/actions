@@ -209,6 +209,101 @@ jobs:
 - Creates PR from fork to upstream repository
 - Exits gracefully when no unreleased changes exist
 
+### github-issue-autosolve
+
+Reusable workflow that automatically solves GitHub issues using Claude. When
+triggered (typically by adding a label), it assesses whether the issue is
+suitable for automation, implements a fix, pushes to a fork, and opens a draft
+PR. Comments are posted on the issue at each stage.
+
+**Usage:**
+
+Create a caller workflow in your repo (e.g. `.github/workflows/autosolve.yml`):
+
+```yaml
+name: Autosolve
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  autosolve:
+    if: github.event.label.name == 'autosolve'
+    uses: cockroachdb/actions/.github/workflows/github-issue-autosolve.yml@main
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      issue_title: ${{ github.event.issue.title }}
+      issue_body: ${{ github.event.issue.body }}
+      vertex_project_id: my-gcp-project
+      vertex_workload_identity_provider: projects/123/locations/global/workloadIdentityPools/pool/providers/provider
+      vertex_service_account: autosolve@my-gcp-project.iam.gserviceaccount.com
+      fork_owner: my-bot-user
+      fork_repo: my-repo
+    secrets:
+      fork_push_token: ${{ secrets.FORK_PUSH_TOKEN }}
+      pr_create_token: ${{ secrets.PR_CREATE_TOKEN }}
+```
+
+**Inputs:**
+
+| Name | Required | Default | Description |
+| ---- | -------- | ------- | ----------- |
+| `issue_number` | yes | | GitHub issue number |
+| `issue_title` | yes | | Issue title |
+| `issue_body` | yes | | Issue body text |
+| `vertex_project_id` | yes | | GCP project ID for Vertex AI |
+| `vertex_workload_identity_provider` | yes | | Workload identity provider resource name |
+| `vertex_service_account` | yes | | Service account for Vertex AI |
+| `fork_owner` | yes | | GitHub user/org that owns the fork |
+| `fork_repo` | yes | | Repository name of the fork |
+| `trigger_label` | no | `autosolve` | Label that triggers the workflow |
+| `allowed_tools` | no | *(action default)* | Claude `--allowedTools` string |
+| `claude_cli_version` | no | `2.1.79` | Claude CLI version to install |
+| `model` | no | `claude-opus-4-6` | Claude model ID |
+| `max_retries` | no | `3` | Maximum implementation attempts |
+| `vertex_region` | no | `us-east5` | GCP region for Vertex AI |
+| `git_user_name` | no | `autosolve[bot]` | Git author/committer name |
+| `git_user_email` | no | `autosolve[bot]@users.noreply.github.com` | Git author/committer email |
+| `verbose_logging` | no | `false` | Enable verbose Claude logging in step output |
+| `timeout_minutes` | no | `20` | Job timeout in minutes |
+
+**Secrets:**
+
+| Name | Required | Description |
+| ---- | -------- | ----------- |
+| `fork_push_token` | yes | PAT with push access to the fork repository |
+| `pr_create_token` | yes | PAT with permission to create PRs on the upstream repo |
+
+The workflow also uses the automatically minted `GITHUB_TOKEN` for issue
+comments, label management, and PR lookups.
+
+**Outputs:**
+
+| Name | Description |
+| ---- | ----------- |
+| `status` | `SUCCESS`, `FAILED`, `SKIPPED`, or `EXISTING_PR` |
+| `pr_url` | URL of the created (or existing) PR |
+
+**Required caller permissions:**
+
+```yaml
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  id-token: write   # for Vertex AI workload identity federation
+```
+
+**How it works:**
+
+1. Checks if a PR already exists for this issue (via head branch name).
+2. Authenticates to Google Cloud via workload identity federation.
+3. **Assess** — Claude evaluates the issue in read-only mode and decides
+   `PROCEED` or `SKIP`.
+4. **Implement** — Claude implements a fix, pushes to the fork, and opens a
+   draft PR on the upstream repo.
+5. Comments on the issue with the outcome and removes the trigger label.
+
 ## Development
 
 Run all tests locally:
