@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 Breaking changes are prefixed with "Breaking Change: ".
 
+## [Unreleased]
+
+## [0.4.0] - 2026-04-09
+
 ### Added
 
 - `autotag-from-changelog` action: add `create-major-tag` input (default `true`) to
