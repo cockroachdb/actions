@@ -178,6 +178,9 @@ jobs:
           base_branch=$(get_base_branch "$PR_BASE_BRANCH" "${{ github.repository }}")
           log_notice "Using base branch: $base_branch"
 
+          # Use single quotes to prevent bash from interpreting backticks
+          unreleased_changes='${{ steps.extract-version.outputs.unreleased_changes }}'
+
           # Build PR body
           pr_body="## Summary
 
@@ -185,7 +188,7 @@ jobs:
 
           ### Changelog Entries
 
-          ${{ steps.extract-version.outputs.unreleased_changes }}"
+          ${unreleased_changes}"
 
           # Create pull request
           head="$FORK_OWNER:${{ steps.create-branch.outputs.branch_name }}"
