@@ -8,6 +8,10 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `autosolve/assess` and `autosolve/implement` actions: evaluate tasks for
+  automated resolution and autonomously implement solutions using Claude.
+  Includes AI security review, token usage tracking, structured log levels
+  (error/info/debug), and fast-fail when the target branch already exists.
 - `create-release-pr` reusable workflow: automates version bump PRs by checking for
   unreleased changes in CHANGELOG, extracting the next version, updating
   the CHANGELOG with new version and release date, optionally running custom update
@@ -36,13 +40,6 @@ Breaking changes are prefixed with "Breaking Change: ".
 - `autotag-from-changelog` now exposes `tag_created` and `tag` outputs so
   callers can react to whether a new tag was pushed.
 - `expect_step_output` test helper for asserting GitHub Actions step outputs.
-- `autosolve/assess` action: evaluate tasks for automated resolution suitability
-  using Claude in read-only mode.
-- `autosolve/implement` action: autonomously implement solutions, validate
-  security, push to fork, and create PRs using Claude. Includes AI security
-  review, token usage tracking, per-file batched diff analysis, and structured
-  log levels (error/info/debug) with permission denial warnings. Fails fast
-  if the target branch already exists on the fork.
 - `get-workflow-ref` action: resolve the ref a caller used to invoke a reusable
   workflow by parsing the caller's workflow file — no API calls or extra
   permissions needed.
