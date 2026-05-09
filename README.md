@@ -245,15 +245,14 @@ enforcement, sensitive file detection, and token usage tracking.
 <a id="token-permissions"></a>
 **Token permissions:**
 
-| Token              | Required scopes                                                  |
-| ------------------ | ---------------------------------------------------------------- |
-| `fork_push_token`  | `contents: write` on the fork repository                         |
-| `pr_create_token`  | `pull_requests: write` on the target repository                  |
+| Token              | Fine-grained                                | Classic |
+| ------------------ | ------------------------------------------- | ------- |
+| `fork_push_token`  | `contents: write` on the fork repository    | `repo`  |
+| `pr_create_token`  | `pull_requests: write` on the target repository | `repo`  |
 
-Label auto-creation (`pr_labels`) requires `issues: write` on the target repo.
-If the token lacks this permission, the action logs a warning and continues —
-the PR is still created, just without labels. Pre-create labels manually to
-avoid the warning.
+Applying labels (`pr_labels`) requires `issues: write` on the target repo
+(already covered by `repo` for classic tokens). If the token lacks this
+permission, the action logs a warning and creates the PR without labels.
 
 For organizations using SAML/SSO, the PAT must be authorized for the
 organization that owns the target repository. See
