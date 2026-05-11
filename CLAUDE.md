@@ -73,7 +73,13 @@ sources `test_helpers.sh` and validates behavior.
   on error paths without logging or returning the error. If ignoring an
   error is genuinely correct (e.g., best-effort cleanup), add a comment
   explaining why it's safe to ignore.
+- Reusable workflows that reference local actions (via `uses: ./path`) must
+  first checkout this repo at the correct ref. Use
+  `cockroachdb/actions/get-workflow-ref@main` to resolve the ref the caller
+  used, then `actions/checkout` with that ref. This is necessary because
+  `uses: ./` resolves relative to the caller's workspace, not the defining
+  repo.
 
 ## Commit messages
 - If a commit updates or adds a specific action, prefix the commit with that
-  action. 
+  action.

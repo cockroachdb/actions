@@ -1,0 +1,324 @@
+name: GitHub Issue Autosolve
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        type: string
+        required: true
+      issue_title:
+        type: string
+        required: true
+      issue_body:
+        type: string
+        required: true
+      trigger_label:
+        type: string
+        required: false
+        default: "autosolve"
+      allowed_tools:
+        type: string
+        required: false
+      claude_cli_version:
+        type: string
+        required: false
+        default: "2.1.79"
+        description: "Claude CLI version to install (e.g. '2.1.79' or 'latest')"
+      model:
+        type: string
+        required: false
+        default: "claude-opus-4-6"
+      max_retries:
+        type: string
+        required: false
+        default: "3"
+      vertex_project_id:
+        type: string
+        required: true
+      vertex_region:
+        type: string
+        required: false
+        default: "us-east5"
+      vertex_workload_identity_provider:
+        type: string
+        required: true
+      vertex_service_account:
+        type: string
+        required: true
+      fork_owner:
+        type: string
+        required: true
+      fork_repo:
+        type: string
+        required: true
+      git_user_name:
+        type: string
+        required: false
+        default: "autosolve[bot]"
+      git_user_email:
+        type: string
+        required: false
+        default: "autosolve[bot]@users.noreply.github.com"
+      verbose_logging:
+        type: boolean
+        required: false
+        default: false
+        description: >
+          Log full Claude output in collapsible groups in the step log.
+          Logs may contain source code snippets, environment variable
+          values, or other repository content quoted in Claude's responses.
+          Security review output is never logged regardless of this setting.
+      timeout_minutes:
+        type: number
+        required: false
+        default: 20
+    secrets:
+      fork_push_token:
+        required: true
+      pr_create_token:
+        required: true
+    outputs:
+      status:
+        value: ${{ jobs.solve.outputs.status }}
+      pr_url:
+        value: ${{ jobs.solve.outputs.pr_url }}
+
+concurrency:
+  group: autosolve-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  # Directory name for the target repo checkout (side-by-side layout).
+  REPO_DIR: repo
+  SYSTEM_PROMPT: "Fix the GitHub issue described in the ISSUE_NUMBER, ISSUE_TITLE, and ISSUE_BODY environment variables."
+
+jobs:
+  solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ env.REPO_DIR }}
+    outputs:
+      status: ${{ steps.final_status.outputs.status }}
+      pr_url: ${{ steps.implement.outputs.pr_url || steps.check.outputs.pr_url }}
+
+    steps:
+      # Resolve the ref the caller used to invoke this reusable workflow,
+      # then checkout the actions repo at that ref so ./autosolve/* actions
+      # are available via relative uses paths.
+      - name: Get workflow ref
+        id: actions-ref
+        uses: cockroachdb/actions/get-workflow-ref@main
+        with:
+          workflow_name: github-issue-autosolve.yml
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v5
+        with:
+          repository: cockroachdb/actions
+          ref: ${{ steps.actions-ref.outputs.ref }}
+          persist-credentials: false
+
+      # Target repo is checked out to repo/ (via defaults.run.working-directory)
+      # so Claude cannot see or modify the actions checkout.
+      - name: Checkout target repo
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          path: ${{ env.REPO_DIR }}
+
+      # --- Check for existing PR ---
+      - name: Check for existing PR
+        id: check
+        shell: bash
+        run: |
+          pr_url="$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --head "autosolve/issue-$ISSUE_NUMBER" \
+            --json url --jq '.[0].url // empty')"
+          exists=false
+          if [ -n "$pr_url" ]; then
+            exists=true
+          fi
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+
+      - name: Comment that PR already exists
+        if: steps.check.outputs.exists == 'true'
+        shell: bash
+        run: |
+          body="Auto-solver was triggered but a PR already exists for this issue: $PR_URL"
+          body+=$'\n\nTo create a new attempt, close the existing PR and add the label again.'
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$body"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PR_URL: ${{ steps.check.outputs.pr_url }}
+
+      # --- Setup (skipped when PR already exists) ---
+      - name: Authenticate to Google Cloud (Vertex)
+        if: steps.check.outputs.exists != 'true'
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ inputs.vertex_project_id }}
+          service_account: ${{ inputs.vertex_service_account }}
+          workload_identity_provider: ${{ inputs.vertex_workload_identity_provider }}
+
+      # --- Assess ---
+      - name: Assess
+        id: assess
+        if: steps.check.outputs.exists != 'true'
+        uses: ./autosolve/assess
+        env:
+          CLAUDE_CODE_USE_VERTEX: "1"
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.vertex_project_id }}
+          CLOUD_ML_REGION: ${{ inputs.vertex_region }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_BODY: ${{ inputs.issue_body }}
+        with:
+          claude_cli_version: ${{ inputs.claude_cli_version }}
+          system_prompt: ${{ env.SYSTEM_PROMPT }}
+          context_vars: "ISSUE_NUMBER,ISSUE_TITLE,ISSUE_BODY"
+          model: ${{ inputs.model }}
+          verbose_logging: ${{ inputs.verbose_logging }}
+          working_directory: ${{ env.REPO_DIR }}
+
+      - name: Comment that issue was skipped
+        if: steps.check.outputs.exists != 'true' && steps.assess.outputs.assessment == 'SKIP'
+        shell: bash
+        run: |
+          body="Auto-solver assessed this issue but determined it is not suitable for automated resolution."
+          body+=$'\n\n```\n'"$SUMMARY"$'\n```'
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$body"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          # Pass summary as an env var as a precautionary measure against
+          # command injection.  It came from the summary claude generated so we
+          # expect it to be safe but let's be even safer.
+          SUMMARY: ${{ steps.assess.outputs.summary }}
+
+      # --- Implement ---
+      - name: Implement
+        id: implement
+        if: steps.check.outputs.exists != 'true' && steps.assess.outputs.assessment == 'PROCEED'
+        uses: ./autosolve/implement
+        env:
+          CLAUDE_CODE_USE_VERTEX: "1"
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ inputs.vertex_project_id }}
+          CLOUD_ML_REGION: ${{ inputs.vertex_region }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          ISSUE_TITLE: ${{ inputs.issue_title }}
+          ISSUE_BODY: ${{ inputs.issue_body }}
+        with:
+          claude_cli_version: ${{ inputs.claude_cli_version }}
+          system_prompt: ${{ env.SYSTEM_PROMPT }}
+          context_vars: "ISSUE_NUMBER,ISSUE_TITLE,ISSUE_BODY"
+          allowed_tools: ${{ inputs.allowed_tools }}
+          model: ${{ inputs.model }}
+          max_retries: ${{ inputs.max_retries }}
+          fork_owner: ${{ inputs.fork_owner }}
+          fork_repo: ${{ inputs.fork_repo }}
+          fork_push_token: ${{ secrets.fork_push_token }}
+          pr_create_token: ${{ secrets.pr_create_token }}
+          pr_labels: "autosolve,autosolve-issue-${{ inputs.issue_number }}"
+          pr_draft: "true"
+          git_user_name: ${{ inputs.git_user_name }}
+          git_user_email: ${{ inputs.git_user_email }}
+          branch_suffix: "issue-${{ inputs.issue_number }}"
+          verbose_logging: ${{ inputs.verbose_logging }}
+          working_directory: ${{ env.REPO_DIR }}
+
+      - name: Comment that implementation succeeded
+        if: steps.implement.outputs.status == 'SUCCESS'
+        shell: bash
+        run: |
+          body="Auto-solver has created a draft PR: $PR_URL"
+          body+=$'\n\nPlease review the changes carefully before approving.'
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$body"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          PR_URL: ${{ steps.implement.outputs.pr_url }}
+
+      - name: Comment that implementation failed
+        if: always() && steps.assess.outputs.assessment == 'PROCEED' && steps.implement.outputs.status != 'SUCCESS'
+        shell: bash
+        run: |
+          body="Auto-solver attempted to fix this issue but was unable to complete the implementation."
+          body+=$'\n\nThis issue may require human intervention.'
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$body"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+
+      # --- Cleanup (always runs) ---
+      - name: Remove label
+        if: always()
+        shell: bash
+        # Best-effort: the label may already have been removed by another run.
+        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$TRIGGER_LABEL" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TRIGGER_LABEL: ${{ inputs.trigger_label }}
+
+      - name: Set final status
+        id: final_status
+        if: always()
+        shell: bash
+        run: |
+          if [ "$PR_EXISTS" = "true" ]; then
+            echo "status=EXISTING_PR" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autosolve"
+              echo "**Status:** Skipped — a PR already exists for this issue: $EXISTING_PR_URL"
+              echo ""
+              echo "To create a new attempt, close the existing PR and add the label again."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$ASSESSMENT" = "SKIP" ]; then
+            echo "status=SKIPPED" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autosolve"
+              echo "**Status:** Skipped — assessment determined this issue is not suitable for automated resolution."
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$IMPL_STATUS" = "SUCCESS" ]; then
+            echo "status=SUCCESS" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=FAILED" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Autosolve"
+              echo "**Status:** Failed — implementation was unable to complete successfully."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+        env:
+          PR_EXISTS: ${{ steps.check.outputs.exists }}
+          EXISTING_PR_URL: ${{ steps.check.outputs.pr_url }}
+          ASSESSMENT: ${{ steps.assess.outputs.assessment }}
+          IMPL_STATUS: ${{ steps.implement.outputs.status }}
+
+      - name: Write token usage summary
+        if: always() && steps.check.outputs.exists != 'true'
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/autosolve-usage.md"
+          if [ -f "$f" ]; then
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          fi
