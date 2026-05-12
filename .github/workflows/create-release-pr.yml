@@ -92,6 +92,16 @@ jobs:
         with:
           changelog-path: ${{ env.REPO_DIR }}/CHANGELOG.md
 
+      - name: Get default branch
+        if: steps.extract-version.outputs.has_unreleased == 'true'
+        id: get-default-branch
+        run: |
+          source ../actions_helpers.sh
+
+          default_branch=$(git branch --show-current)
+          log_notice "Default branch: $default_branch"
+          set_output "default_branch" "$default_branch"
+
       - name: Create branch
         if: steps.extract-version.outputs.has_unreleased == 'true'
         id: create-branch
@@ -156,6 +166,14 @@ jobs:
           fork_url="https://github.com/$FORK_OWNER/$FORK_REPO.git"
           log_notice "Adding fork remote at $fork_url"
           git remote add fork "$fork_url"
+
+          # Sync fork's default branch with upstream to include any changes from upstream
+          # that the fork doesn't have. This prevents feature branches from appearing to add
+          # files requiring special permissions (e.g., workflows), which would cause permission issues
+          default_branch="${{ steps.get-default-branch.outputs.default_branch }}"
+          log_notice "Syncing fork's $default_branch with origin/$default_branch"
+          git push --force fork "origin/$default_branch:$default_branch"
+          log_notice "Fork's $default_branch is now in sync with origin"
 
           branch_name="${{ steps.create-branch.outputs.branch_name }}"
           git push fork "$branch_name"
