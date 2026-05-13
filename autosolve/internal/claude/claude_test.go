@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -381,6 +382,176 @@ func TestBuildEnv_UnsetContextVar(t *testing.T) {
 	}
 }
 
+func TestBuildBwrapArgs(t *testing.T) {
+	sb := SandboxOptions{
+		WorkingDir: "/work/repo",
+		ScratchDir: "/runner/temp/autosolve-scratch",
+		ReadPaths:  []string{"/share/protos", "/share/schemas"},
+	}
+
+	systemDirs := []string{"/usr", "/etc", "/lib", "/lib64", "/opt"}
+	runDirs := []string{"/run/systemd/resolve"}
+	args := buildBwrapArgs(sb, "/usr/local/bin/claude",
+		[]string{"--print", "--model", "x"}, systemDirs, runDirs)
+
+	// Working dir must be bound RW and used as cwd.
+	if !argSeq(args, "--bind", "/work/repo", "/work/repo") {
+		t.Errorf("expected RW bind for working dir; got %v", args)
+	}
+	if !argSeq(args, "--chdir", "/work/repo") {
+		t.Errorf("expected --chdir to working dir; got %v", args)
+	}
+
+	// Scratch dir must be bound RW; HOME must point at its home/ subdir.
+	if !argSeq(args, "--bind", "/runner/temp/autosolve-scratch", "/runner/temp/autosolve-scratch") {
+		t.Errorf("expected RW bind for scratch dir; got %v", args)
+	}
+	if !argSeq(args, "--setenv", "HOME", "/runner/temp/autosolve-scratch/home") {
+		t.Errorf("expected HOME under scratch dir; got %v", args)
+	}
+
+	// Read paths must be bound RO.
+	for _, p := range sb.ReadPaths {
+		if !argSeq(args, "--ro-bind", p, p) {
+			t.Errorf("expected RO bind for %q; got %v", p, args)
+		}
+	}
+
+	// All system dirs the caller asked for must be bound RO.
+	for _, p := range systemDirs {
+		if !argSeq(args, "--ro-bind", p, p) {
+			t.Errorf("expected RO bind for system dir %q; got %v", p, args)
+		}
+	}
+
+	// /run/systemd/resolve must be bound RO so DNS works
+	// (/etc/resolv.conf is a symlink into /run/systemd/resolve/).
+	if !argSeq(args, "--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve") {
+		t.Errorf("expected RO bind for /run/systemd/resolve; got %v", args)
+	}
+	// We must NOT bind /run wholesale — it would expose /run/docker.sock.
+	if argSeq(args, "--ro-bind", "/run", "/run") {
+		t.Errorf("must not bind all of /run (would expose docker.sock); got %v", args)
+	}
+
+	// GITHUB_WORKSPACE / RUNNER_TEMP must NOT be bound just because
+	// they appear in the env — only the listed paths are visible.
+	for _, denied := range []string{"/github/workspace", "/runner/temp"} {
+		if argSeq(args, "--bind", denied, denied) {
+			t.Errorf("unexpected bind for %q; sandbox should deny by default. got %v", denied, args)
+		}
+	}
+
+	// --share-net is required: avoids RTM_NEWADDR failure on Ubuntu 24.04+.
+	if !slices.Contains(args, "--share-net") {
+		t.Errorf("expected --share-net; got %v", args)
+	}
+
+	// /tmp must be tmpfs (private + writable + per-invocation).
+	if !argSeq(args, "--tmpfs", "/tmp") {
+		t.Errorf("expected tmpfs /tmp; got %v", args)
+	}
+
+	// The wrapped target and its argv come last after `--`.
+	dashIdx := -1
+	for i, a := range args {
+		if a == "--" {
+			dashIdx = i
+			break
+		}
+	}
+	if dashIdx < 0 {
+		t.Fatalf("expected -- separator; got %v", args)
+	}
+	tail := args[dashIdx+1:]
+	want := []string{"/usr/local/bin/claude", "--print", "--model", "x"}
+	if len(tail) != len(want) {
+		t.Fatalf("expected tail %v; got %v", want, tail)
+	}
+	for i := range want {
+		if tail[i] != want[i] {
+			t.Errorf("tail[%d] = %q, want %q", i, tail[i], want[i])
+		}
+	}
+}
+
+// TestBuildBwrapArgs_EmptyReadPaths verifies that an empty or nil ReadPaths
+// produces no extra --ro-bind entries beyond the system/run dirs and the
+// working/scratch binds. Both nil and []string{} must behave identically.
+func TestBuildBwrapArgs_EmptyReadPaths(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		readPaths []string
+	}{
+		{"nil", nil},
+		{"empty", []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sb := SandboxOptions{
+				WorkingDir: "/work/repo",
+				ScratchDir: "/runner/temp/autosolve-scratch",
+				ReadPaths:  tc.readPaths,
+			}
+			args := buildBwrapArgs(sb, "/usr/local/bin/claude",
+				[]string{"--print"}, nil, nil)
+
+			// Working and scratch dirs are still bound RW.
+			if !argSeq(args, "--bind", "/work/repo", "/work/repo") {
+				t.Errorf("expected RW bind for working dir; got %v", args)
+			}
+			if !argSeq(args, "--bind", "/runner/temp/autosolve-scratch", "/runner/temp/autosolve-scratch") {
+				t.Errorf("expected RW bind for scratch dir; got %v", args)
+			}
+			// No --ro-bind entries should appear at all (no system dirs,
+			// no run dirs, no read paths).
+			for i, a := range args {
+				if a == "--ro-bind" {
+					t.Errorf("unexpected --ro-bind at index %d in %v", i, args)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildBwrapArgs_OmitsAbsentOptionalDirs documents that buildBwrapArgs
+// only emits binds for the paths it is told about — when the caller passes
+// empty slices for systemDirs / runDirs, no corresponding --ro-bind appears.
+// This is the contract that lets wrapWithBwrap drive host-stat() decisions
+// without buildBwrapArgs needing to consult the filesystem itself.
+func TestBuildBwrapArgs_OmitsAbsentOptionalDirs(t *testing.T) {
+	sb := SandboxOptions{
+		WorkingDir: "/work/repo",
+		ScratchDir: "/scratch",
+	}
+	args := buildBwrapArgs(sb, "/bin/claude", nil, nil, nil)
+
+	for _, p := range []string{"/usr", "/etc", "/lib", "/lib64", "/opt", "/run/systemd/resolve"} {
+		if argSeq(args, "--ro-bind", p, p) {
+			t.Errorf("did not expect bind for %q when caller passed empty system/run dirs; got %v", p, args)
+		}
+	}
+}
+
+// argSeq reports whether `seq` appears as a contiguous subsequence in args.
+func argSeq(args []string, seq ...string) bool {
+	if len(seq) == 0 {
+		return true
+	}
+	for i := 0; i+len(seq) <= len(args); i++ {
+		match := true
+		for j, s := range seq {
+			if args[i+j] != s {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -408,7 +579,7 @@ func envToMap(env []string) map[string]string {
 	return m
 }
 
-func writeJSON(t *testing.T, v interface{}) string {
+func writeJSON(t *testing.T, v any) string {
 	t.Helper()
 	data, err := json.Marshal(v)
 	if err != nil {

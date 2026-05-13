@@ -118,9 +118,27 @@ inputs:
     required: false
     default: "error"
   working_directory:
-    description: Directory to run in (relative to workspace root). Defaults to workspace root.
+    description: >
+      Directory the action runs in, relative to GITHUB_WORKSPACE. Required.
+      Must be a strict subdirectory of GITHUB_WORKSPACE — the workspace
+      root itself is rejected because other actions (e.g.
+      google-github-actions/auth) drop credential files there. Check the
+      target repo out into a subdirectory like ./repo and set
+      working_directory to that path. This directory is the only
+      caller-controlled writable location bound into the bubblewrap
+      sandbox; Claude additionally gets a private writable /tmp
+      (tmpfs, discarded after the run).
+    required: true
+  read_paths:
+    description: >
+      Comma-separated extra host paths (files or directories) to bind
+      read-only into the sandbox. Use for shared schemas, generated
+      protos, or other references the task needs to consult but not
+      modify. Paths may be absolute or relative to GITHUB_WORKSPACE.
+      The file referenced by GOOGLE_APPLICATION_CREDENTIALS, if set,
+      is auto-bound and does not need to be listed here.
     required: false
-    default: "."
+    default: ""
 
 outputs:
   status:
@@ -142,8 +160,38 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Set up sandbox
+      shell: bash
+      run: |
+        source "${{ github.action_path }}/../../actions_helpers.sh"
+        if [[ "$RUNNER_OS" != "Linux" ]]; then
+          log_error "autosolve requires Linux runners (the sandbox uses bubblewrap, which is Linux-only)"
+          exit 1
+        fi
+        sudo apt-get update
+        sudo apt-get install --yes bubblewrap
+        # Ubuntu 24.04+ restricts unprivileged user namespaces by default,
+        # which blocks bwrap's uid mapping. Disabling this on an ephemeral
+        # hosted runner is acceptable; persistent self-hosted runners
+        # should evaluate the tradeoff before adopting this action.
+        # We require the sysctl to be present (rather than skipping it on
+        # older Ubuntu) so the supported runner surface is unambiguous —
+        # silent skips would let the action limp along on untested kernels
+        # and surface confusing bwrap failures later.
+        if [ ! -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+          log_error "autosolve requires Ubuntu 24.04+ runners: kernel.apparmor_restrict_unprivileged_userns sysctl is missing"
+          exit 1
+        fi
+        sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
+        mkdir -p "$RUNNER_TEMP/autosolve-scratch/home"
+
     - name: Set up Claude CLI
       shell: bash
+      # The sandbox ro-binds /usr unconditionally, so installing into
+      # /usr/local/bin keeps the claude binary reachable inside bwrap
+      # without per-binary bind plumbing in the Go code. The native
+      # installer drops it under ~/.local/bin and offers no override
+      # flag or env var, so we move it ourselves.
       run: |
         if command -v roachdev >/dev/null; then
           printf '#!/bin/sh\nexec roachdev claude -- "$@"\n' > /usr/local/bin/claude
@@ -151,7 +199,9 @@ runs:
           echo "Claude CLI: using roachdev wrapper ($(roachdev version))"
         else
           curl --fail --silent --show-error --location https://claude.ai/install.sh | bash -s -- "$CLAUDE_CLI_VERSION"
-          echo "Claude CLI installed: $(claude --version)"
+          install --mode=0755 ~/.local/bin/claude /usr/local/bin/claude
+          rm ~/.local/bin/claude
+          echo "Claude CLI installed to /usr/local/bin/claude: $(claude --version)"
         fi
       env:
         CLAUDE_CLI_VERSION: ${{ inputs.claude_cli_version }}
@@ -184,6 +234,11 @@ runs:
     - name: Run implementation
       id: implement
       shell: bash
+      # working-directory is load-bearing — the autosolve binary reads
+      # the cwd via os.Getwd() in internal/config/loadSandboxConfig and
+      # validates it against GITHUB_WORKSPACE. Removing this line will
+      # cause validation to fail confusingly (cwd defaults to the
+      # workspace root, which the binary explicitly rejects).
       working-directory: ${{ inputs.working_directory }}
       run: $RUNNER_TEMP/autosolve implement
       env:
@@ -210,3 +265,4 @@ runs:
         INPUT_COMMIT_SIGNATURE: ${{ inputs.commit_signature }}
         INPUT_PR_FOOTER: ${{ inputs.pr_footer }}
         INPUT_LOG_LEVEL: ${{ inputs.log_level }}
+        INPUT_READ_PATHS: ${{ inputs.read_paths }}
