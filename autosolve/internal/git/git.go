@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -19,14 +20,40 @@ type Client interface {
 	Add(args ...string) error
 	Commit(message string) error
 	Push(args ...string) error
+	BranchExists(remoteURL, branch string) (bool, error)
+	RevParse(args ...string) (string, error)
 	ResetHead() error
 }
 
 // CLIClient implements Client by shelling out to the git binary.
-// Extra env vars (e.g. for authentication) can be set via PushEnv;
-// they are applied only to git push commands.
+//
+// AuthEnv carries env vars (typically GIT_ASKPASS plus credentials)
+// applied to remote-contacting commands (Push, BranchExists). Set this
+// only when every remote-contacting call should use the same credentials
+// — the env is not URL-scoped, so adding a new call site that targets a
+// different remote would silently send these creds there. Local-only
+// commands ignore AuthEnv entirely (git only invokes the askpass when
+// challenged for credentials).
 type CLIClient struct {
-	PushEnv []string
+	AuthEnv []string
+}
+
+// NewAuthEnv builds the env block consumed by both CLIClient.AuthEnv
+// and scripts/git-askpass.sh: GIT_ASKPASS points at the askpass script,
+// GIT_USER/GIT_PASSWORD carry the credentials it returns,
+// GIT_TERMINAL_PROMPT=0 prevents git from falling back to an interactive
+// prompt if anything goes wrong.
+//
+// The askpass script lives under SCRIPTS_DIR, an env var the autosolve
+// action sets before invoking the binary (and config validates is present).
+func NewAuthEnv(user, token string) []string {
+	askpass := filepath.Join(os.Getenv("SCRIPTS_DIR"), "git-askpass.sh")
+	return []string{
+		"GIT_ASKPASS=" + askpass,
+		"GIT_USER=" + user,
+		"GIT_PASSWORD=" + token,
+		"GIT_TERMINAL_PROMPT=0",
+	}
 }
 
 func (c *CLIClient) Diff(args ...string) (string, error) {
@@ -64,10 +91,31 @@ func (c *CLIClient) Push(args ...string) error {
 	cmd := exec.Command("git", append([]string{"push"}, args...)...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	if len(c.PushEnv) > 0 {
-		cmd.Env = append(os.Environ(), c.PushEnv...)
+	if len(c.AuthEnv) > 0 {
+		cmd.Env = append(os.Environ(), c.AuthEnv...)
 	}
 	return cmd.Run()
+}
+
+// BranchExists reports whether the named branch exists on the given
+// remote URL. Implemented via `git ls-remote <url> refs/heads/<branch>`,
+// which prints "<sha>\t<refname>" for a match and nothing for a miss
+// (exit 0 in both cases; nonzero only on network/auth/URL errors).
+func (c *CLIClient) BranchExists(remoteURL, branch string) (bool, error) {
+	cmd := exec.Command("git", "ls-remote", remoteURL, "refs/heads/"+branch)
+	cmd.Stderr = os.Stderr
+	if len(c.AuthEnv) > 0 {
+		cmd.Env = append(os.Environ(), c.AuthEnv...)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+func (c *CLIClient) RevParse(args ...string) (string, error) {
+	return c.output(append([]string{"rev-parse"}, args...)...)
 }
 
 func (c *CLIClient) ResetHead() error {

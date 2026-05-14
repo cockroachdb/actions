@@ -14,7 +14,6 @@ import (
 type Client interface {
 	CreatePR(ctx context.Context, opts PullRequestOptions) (string, error)
 	CreateLabel(ctx context.Context, repo string, name string) error
-	BranchExists(ctx context.Context, repo, branch string) (bool, error)
 }
 
 // PullRequestOptions configures PR creation.
@@ -28,7 +27,8 @@ type PullRequestOptions struct {
 	Draft  bool
 }
 
-// GithubClient implements Client by shelling out to the gh CLI.
+// GithubClient is a Client implementation that shells out to the gh CLI,
+// authenticating with the given Token.
 type GithubClient struct {
 	Token string
 }
@@ -60,36 +60,22 @@ func (c *GithubClient) CreateLabel(ctx context.Context, repo string, name string
 	cmd := c.command(ctx, "label", "create", name,
 		"--repo", repo,
 		"--color", "6f42c1")
-	// Capture stderr so we can distinguish "already exists" from real errors.
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if strings.Contains(stderr.String(), "already exists") {
+		msg := stderr.String()
+		if strings.Contains(msg, "already exists") {
 			return nil
 		}
-		return fmt.Errorf("creating label %q: %s", name, strings.TrimSpace(stderr.String()))
+		_, _ = os.Stderr.WriteString(msg)
+		return fmt.Errorf("creating label %q: %w", name, err)
 	}
 	return nil
 }
 
-func (c *GithubClient) BranchExists(ctx context.Context, repo, branch string) (bool, error) {
-	cmd := c.command(ctx, "api", fmt.Sprintf("repos/%s/branches/%s", repo, branch),
-		"--silent")
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if strings.Contains(stderr.String(), "Not Found") ||
-			strings.Contains(stderr.String(), "404") {
-			return false, nil
-		}
-		return false, fmt.Errorf("checking branch %q: %s", branch, strings.TrimSpace(stderr.String()))
-	}
-	return true, nil
-}
-
 func (c *GithubClient) command(ctx context.Context, args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "gh", args...)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("GH_TOKEN=%s", c.Token))
+	cmd.Env = append(os.Environ(), "GH_TOKEN="+c.Token)
 	cmd.Stderr = os.Stderr
 	return cmd
 }

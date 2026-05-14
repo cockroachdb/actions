@@ -209,6 +209,7 @@ enforcement, sensitive file detection, and token usage tracking.
 | `fork_repo`          | **required**                     | Repository name of the fork                                                                                      |
 | `fork_push_token`    | **required**                     | PAT with `contents: write` on the fork repository                                                                |
 | `pr_create_token`    | **required**                     | PAT with `pull_requests: write` on the target repo (see [Token permissions](#token-permissions))                 |
+| `allow_fork_force_sync` | `false`                       | When the fork's base branch has diverged from `origin`, force-overwrite it instead of aborting. Only safe for test/throwaway forks. |
 | `blocked_paths`      | `""`                             | Comma-separated path prefixes that cannot be modified (case-sensitive). `.github/` is always blocked.                             |
 | `git_user_name`      | `autosolve[bot]`                 | Git author/committer name                                                                                        |
 | `git_user_email`     | `autosolve[bot]@users.noreply.github.com` | Git author/committer email                                                                            |
@@ -265,8 +266,16 @@ must have write on the target and read on the fork.
 
 | Token              | Fine-grained                                | Classic |
 | ------------------ | ------------------------------------------- | ------- |
-| `fork_push_token`  | `contents: write` on the fork repository    | `repo`  |
+| `fork_push_token`  | `contents: write` on the fork repository (plus `workflows: write` — see below) | `repo` (plus `workflow` — see below) |
 | `pr_create_token`  | `pull_requests: write` on the target repository | `repo`  |
+
+The `fork_push_token` additionally needs the `workflow` scope (classic) or
+`workflows: write` permission (fine-grained) if the fork's base branch has
+fallen behind upstream by any commit that touches `.github/workflows/`.
+The bot's own commits can never include workflow-file changes (autosolve
+blocks `.github/` from staging), so this requirement only comes from
+upstream commits relayed during the fork base-branch sync. Without the
+scope, GitHub rejects the sync push with a workflow-scope error.
 
 Applying labels (`pr_labels`) requires `issues: write` on the target repo
 (already covered by `repo` for classic tokens). If the token lacks this
