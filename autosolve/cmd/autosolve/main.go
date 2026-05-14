@@ -79,7 +79,9 @@ func runImplement(ctx context.Context) error {
 		return err
 	}
 
-	gitClient := &git.CLIClient{}
+	gitClient := &git.CLIClient{
+		AuthEnv: git.NewAuthEnv(cfg.ForkOwner, cfg.ForkPushToken),
+	}
 	ghClient := &github.GithubClient{Token: cfg.PRCreateToken}
 	return implement.Run(ctx, cfg, &claude.CLIRunner{}, ghClient, gitClient, tmpDir)
 }

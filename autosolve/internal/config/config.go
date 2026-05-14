@@ -75,6 +75,14 @@ type Config struct {
 	BranchSuffix    string
 	CommitSignature string
 
+	// AllowForkForceSync controls fork base-branch sync behavior. When
+	// false (default), the fork's base branch is fast-forwarded from
+	// origin and the run aborts if the FF push is rejected. When true,
+	// a rejected FF falls back to a force push that overwrites any
+	// commits on fork/<base> not in origin/<base>. Enable only for
+	// test/throwaway forks.
+	AllowForkForceSync bool
+
 	// GitHub context
 	GithubRepository string
 	PRTargetRepo     string // repo where PRs are created; defaults to GithubRepository
@@ -117,6 +125,10 @@ func LoadImplementConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	allowForkForceSync, err := envBool("INPUT_ALLOW_FORK_FORCE_SYNC", false)
+	if err != nil {
+		return nil, err
+	}
 	logLevel, err := parseLogLevel(os.Getenv("INPUT_LOG_LEVEL"))
 	if err != nil {
 		return nil, err
@@ -152,6 +164,8 @@ func LoadImplementConfig() (*Config, error) {
 		BranchPrefix:    envOrDefault("INPUT_BRANCH_PREFIX", defaultBranchPrefix),
 		BranchSuffix:    os.Getenv("INPUT_BRANCH_SUFFIX"),
 		CommitSignature: envOrDefault("INPUT_COMMIT_SIGNATURE", defaultCommitSignature),
+
+		AllowForkForceSync: allowForkForceSync,
 
 		GithubRepository: os.Getenv("GITHUB_REPOSITORY"),
 		PRTargetRepo:     envOrDefault("INPUT_PR_TARGET_REPO", os.Getenv("GITHUB_REPOSITORY")),
@@ -258,6 +272,11 @@ func ParseBlockedPaths(raw string) []string {
 // security review.
 func (c *Config) SecurityReviewModel() string {
 	return "claude-sonnet-4-6"
+}
+
+// ForkURL returns the HTTPS clone URL for the fork.
+func (c *Config) ForkURL() string {
+	return fmt.Sprintf("https://github.com/%s/%s.git", c.ForkOwner, c.ForkRepo)
 }
 
 // sandboxInputs is the parsed/validated set of inputs that determine the

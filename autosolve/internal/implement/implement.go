@@ -25,6 +25,9 @@ const retryPrompt = "The previous attempt did not succeed. Please review what we
 var RetryDelay = 10 * time.Second
 
 // Run executes the implementation phase.
+//
+// ghClient targets the upstream repo where the PR will be created (needs
+// pull_requests:write). All fork-side operations go through gitClient.
 func Run(
 	ctx context.Context,
 	cfg *config.Config,
@@ -56,12 +59,61 @@ func Run(
 	branchName := cfg.BranchPrefix + suffix
 
 	forkRepo := fmt.Sprintf("%s/%s", cfg.ForkOwner, cfg.ForkRepo)
-	exists, err := ghClient.BranchExists(ctx, forkRepo, branchName)
+	exists, err := gitClient.BranchExists(cfg.ForkURL(), branchName)
 	if err != nil {
-		return fmt.Errorf("checking branch availability: %w", err)
+		return fmt.Errorf("checking branch availability on %s: %w", forkRepo, err)
 	}
 	if exists {
 		return fmt.Errorf("branch %q already exists on %s — delete it or use a different branch_suffix", branchName, forkRepo)
+	}
+
+	// Verify the local origin tracking ref for the PR base exists; the
+	// fork sync push (next) reads from it. Without this check, a missing
+	// ref surfaces as a confusing "src refspec ... does not match any"
+	// failure that our sync error message misattributes to fork divergence.
+	baseRef := "refs/remotes/origin/" + cfg.PRBaseBranch
+	if _, err := gitClient.RevParse("--verify", baseRef); err != nil {
+		return fmt.Errorf("%s not found locally — the workflow's actions/checkout step must include this branch (used as the sync source for fork/%s): %w", baseRef, cfg.PRBaseBranch, err)
+	}
+
+	// Configure git identity, add the fork remote, and create the local
+	// feature branch. Done upfront (before the fork sync and Claude run)
+	// so all fork-affecting setup is in one place and the sync push can
+	// use the `fork` remote name like commitAndPush does.
+	if err := setupForkRemote(cfg, gitClient, branchName); err != nil {
+		return fmt.Errorf("preparing fork remote: %w", err)
+	}
+
+	// Sync the fork's base branch with the local origin tracking ref so
+	// the eventual feature-branch push only transmits the bot's commit.
+	// Without this, a stale fork would force git to relay every upstream
+	// commit it lacks.
+	//
+	// We push refs/remotes/origin/<base> directly rather than fetching
+	// first — actions/checkout just brought it down from the workflow's
+	// repo, so it's already current and a re-fetch would only require
+	// origin auth that the workflow may not have configured. The sync
+	// source is whatever the workflow checked out as origin (typically
+	// github.repository), not GitHub's tracked fork-parent metadata —
+	// this matters when the bot's fork was created from a different repo
+	// than the one the PR targets.
+	//
+	// Run this before invoking Claude so a divergent or unreachable fork
+	// fails the run before any tokens are spent.
+	//
+	// Try a fast-forward first so a divergent fork base branch can't be
+	// silently overwritten. AllowForkForceSync gates the fallback for test
+	// forks where overwriting is acceptable.
+	action.LogNotice(fmt.Sprintf("Syncing fork's %s with origin", cfg.PRBaseBranch))
+	syncRefspec := fmt.Sprintf("refs/remotes/origin/%s:refs/heads/%s", cfg.PRBaseBranch, cfg.PRBaseBranch)
+	if err := gitClient.Push("fork", syncRefspec); err != nil {
+		if !cfg.AllowForkForceSync {
+			return fmt.Errorf("fast-forward sync to fork/%s rejected (likely diverged from origin/%s): %w. Set allow_fork_force_sync=true to overwrite the fork's base branch", cfg.PRBaseBranch, cfg.PRBaseBranch, err)
+		}
+		action.LogWarning(fmt.Sprintf("Fast-forward sync rejected; force-overwriting fork/%s from origin/%s (allow_fork_force_sync=true)", cfg.PRBaseBranch, cfg.PRBaseBranch))
+		if err := gitClient.Push("--force", "fork", syncRefspec); err != nil {
+			return fmt.Errorf("force-syncing fork's %s: %w", cfg.PRBaseBranch, err)
+		}
 	}
 
 	// Build prompt
@@ -199,12 +251,6 @@ func Run(
 	// Stage, validate, and submit
 	var prURL string
 	if implStatus == "SUCCESS" {
-		if err := setupForkRemote(cfg, gitClient, branchName); err != nil {
-			// Write outputs before returning the error so status/summary are
-			// available to subsequent workflow steps.
-			_ = writeOutputs("FAILED", "", "", resultText, &tracker)
-			return fmt.Errorf("PR creation failed: %w", err)
-		}
 		commitSubject, commitBody, err := stageChanges(cfg, gitClient, tmpDir)
 		if err != nil {
 			_ = writeOutputs("FAILED", "", "", resultText, &tracker)
@@ -249,20 +295,7 @@ func setupForkRemote(cfg *config.Config, gitClient git.Client, branchName string
 		return fmt.Errorf("setting git user.email: %w", err)
 	}
 
-	// Set fork credentials and GIT_ASKPASS for the git push subprocess
-	// only, so the token is never in the broader process environment or
-	// written to disk.
-	if cliClient, ok := gitClient.(*git.CLIClient); ok {
-		askpass := filepath.Join(os.Getenv("SCRIPTS_DIR"), "git-askpass.sh")
-		cliClient.PushEnv = []string{
-			"GIT_ASKPASS=" + askpass,
-			"GIT_FORK_USER=" + cfg.ForkOwner,
-			"GIT_FORK_PASSWORD=" + cfg.ForkPushToken,
-			"GIT_TERMINAL_PROMPT=0",
-		}
-	}
-
-	forkURL := fmt.Sprintf("https://github.com/%s/%s.git", cfg.ForkOwner, cfg.ForkRepo)
+	forkURL := cfg.ForkURL()
 
 	remotes, err := gitClient.Remote()
 	if err != nil {

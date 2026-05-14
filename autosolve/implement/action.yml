@@ -74,6 +74,14 @@ inputs:
     description: PAT with permission to create PRs on the upstream repo.
     required: false
     default: ""
+  allow_fork_force_sync:
+    description: >
+      Whether to allow force-overwriting the fork's base branch when it has
+      diverged from origin. Defaults to false: a fast-forward is attempted
+      first, and if it fails the action aborts. Enable only for test or
+      throwaway forks where overwriting commits on the base branch is safe.
+    required: false
+    default: "false"
   blocked_paths:
     description: >
       Comma-separated path prefixes that cannot be modified.
@@ -257,6 +265,7 @@ runs:
         INPUT_FORK_REPO: ${{ inputs.fork_repo }}
         INPUT_FORK_PUSH_TOKEN: ${{ inputs.fork_push_token }}
         INPUT_PR_CREATE_TOKEN: ${{ inputs.pr_create_token }}
+        INPUT_ALLOW_FORK_FORCE_SYNC: ${{ inputs.allow_fork_force_sync }}
         INPUT_BLOCKED_PATHS: ${{ inputs.blocked_paths }}
         INPUT_GIT_USER_NAME: ${{ inputs.git_user_name }}
         INPUT_GIT_USER_EMAIL: ${{ inputs.git_user_email }}
