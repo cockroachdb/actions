@@ -8,6 +8,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-18
+
 ### Added
 
 - `autosolve/assess` and `autosolve/implement` actions: evaluate tasks for
