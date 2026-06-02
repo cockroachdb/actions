@@ -8,6 +8,13 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+### Added
+
+- `sync-fork` reusable workflow: runs in the upstream repo and fast-forwards a
+  fork's `main` from this repo's `main`. Aborts when the fork has diverged
+  unless `allow_fork_force_sync` is set, in which case the fork is
+  force-overwritten.
+
 ## [0.5.0] - 2026-05-18
 
 ### Added

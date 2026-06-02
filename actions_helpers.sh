@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Shared shell helpers for all GitHub Actions in this repo.
 
+ACTIONS_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # GitHub Actions log commands — emit structured annotations via stdout.
 log_error()   { echo "::error::$*"; }
 log_warning() { echo "::warning::$*"; }
@@ -25,6 +27,15 @@ set_output_multiline() {
 # Verify a command is on PATH: require_command <name>
 require_command() {
   command -v "$1" >/dev/null || { log_error "$1 not found on PATH"; return 1; }
+}
+
+# Configure git to read credentials from env vars via the askpass helper.
+# Usage: setup_git_auth <user> <password>
+setup_git_auth() {
+  export GIT_ASKPASS="$ACTIONS_HELPERS_DIR/git_askpass.sh"
+  export GIT_USER="$1"
+  export GIT_PASSWORD="$2"
+  export GIT_TERMINAL_PROMPT=0
 }
 
 # Append content to the GitHub Actions step summary.
