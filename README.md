@@ -427,6 +427,55 @@ jobs:
 - Creates PR from fork to upstream repository
 - Exits gracefully when no unreleased changes exist
 
+### sync-fork
+
+Reusable workflow that pushes the calling (upstream) repo's `main` to a fork's
+`main`. Intended to run in the upstream repo. Fast-forwards when possible;
+aborts when the fork has diverged unless `allow_fork_force_sync` is set, in
+which case the fork's `main` is force-overwritten with this repo's. No-op when
+`github.repository` doesn't match the configured `upstream_repo`.
+
+**Usage:**
+
+```yaml
+name: Sync Fork
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    uses: cockroachdb/actions/.github/workflows/sync-fork.yml@v0
+    with:
+      upstream_repo: cockroachdb/my-repo
+      fork_repo: my-bot/my-repo-fork
+    secrets:
+      fork_push_token: ${{ secrets.FORK_PUSH_TOKEN }}  # see Secrets below for required permissions
+```
+
+**Inputs:**
+
+| Name                    | Required | Default | Description                                      |
+| ----------------------- | -------- | ------- | ------------------------------------------------ |
+| `upstream_repo`         | Yes      |         | Upstream repo in `owner/name` form this workflow is expected to run in. The job no-ops when `github.repository` doesn't match. |
+| `fork_repo`             | Yes      |         | Fork repo in `owner/name` form to push `main` to |
+| `allow_fork_force_sync` | No       | `false` | When the fork's `main` has diverged from this repo's `main`, force-overwrite it instead of aborting. Only safe for test/throwaway forks. |
+
+**Secrets:**
+
+| Name              | Required | Description                                      |
+| ----------------- | -------- | ------------------------------------------------ |
+| `fork_push_token` | Yes      | PAT with Contents (Read and write) and Workflows (Read and write) on the fork (classic PATs: `repo` + `workflow` scopes). The Workflows scope is required because a sync push may relay commits touching `.github/workflows/` that this repo has accumulated since the fork last synced. |
+
+**Features:**
+
+- Compares `github.repository` against `upstream_repo` and exits early when they don't match
+- Pushes to the fork's `main` using `fork_push_token`; fetches this repo's `main` using the built-in `GITHUB_TOKEN`
+- By default (`allow_fork_force_sync: false`), aborts when the fork's `main` has diverged — protects against accidental data loss on forks used for real work
+- When `allow_fork_force_sync: true`, force-overwrites the fork's `main` on divergence, discarding any commits unique to the fork. Only safe when the fork's `main` is treated as a mirror, and the fork's `main` allows force-pushes by `fork_push_token` (e.g., no branch protection blocking it)
+
 ## Development
 
 Run all tests locally:

@@ -161,11 +161,7 @@ jobs:
         run: |
           source ../actions_helpers.sh
 
-          # Configure git credentials for push
-          # Uses inline credential helper to inject PAT. Token is visible in process
-          # listings but this is acceptable only because GitHub Actions runs in ephemeral
-          # environments where no other users can see the process list.
-          git config --local credential.helper "!f() { echo \"username=$FORK_OWNER\"; echo \"password=\${FORK_PUSH_TOKEN}\"; }; f"
+          setup_git_auth "$FORK_OWNER" "$FORK_PUSH_TOKEN"
 
           # Add fork remote
           fork_url="https://github.com/$FORK_OWNER/$FORK_REPO.git"

@@ -1,0 +1,100 @@
+name: Sync Fork
+
+on:
+  workflow_call:
+    inputs:
+      upstream_repo:
+        description: Upstream repo in "owner/name" form this workflow is expected to run in. The job no-ops when github.repository doesn't match.
+        required: true
+        type: string
+      fork_repo:
+        description: Fork repo in "owner/name" form to push main to.
+        required: true
+        type: string
+      allow_fork_force_sync:
+        description: When the fork's main has diverged from this repo's main, force-overwrite it instead of aborting. Only safe for test/throwaway forks.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      fork_push_token:
+        description: >-
+          PAT with Contents (Read and write) and Workflows (Read and write) on
+          the fork (classic PATs: `repo` + `workflow` scopes). The Workflows
+          scope is required because a sync push may relay commits touching
+          `.github/workflows/` that this repo has accumulated since the fork
+          last synced.
+        required: true
+
+jobs:
+  sync-fork:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # checkout fetches this repo's main + actions repo
+    steps:
+      - name: Get workflow ref
+        id: workflow-ref
+        uses: cockroachdb/actions/get-workflow-ref@v0
+        with:
+          workflow_name: cockroachdb/actions/.github/workflows/sync-fork.yml
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v6
+        with:
+          repository: cockroachdb/actions
+          ref: ${{ steps.workflow-ref.outputs.ref }}
+          path: actions-repo
+          persist-credentials: false
+
+      - name: Checkout this repo (upstream)
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # need history for fast-forward push detection
+          path: upstream
+          persist-credentials: false
+
+      - name: Skip unless running on the configured upstream
+        id: check
+        env:
+          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
+          REPO: ${{ github.repository }}
+        run: |
+          source actions-repo/actions_helpers.sh
+          if [ "$REPO" = "$UPSTREAM_REPO" ]; then
+            set_output "skip" "false"
+          else
+            log_notice "Running on $REPO, but upstream_repo is $UPSTREAM_REPO; nothing to sync."
+            set_output "skip" "true"
+          fi
+
+      - name: Sync fork main from this repo's main
+        if: steps.check.outputs.skip == 'false'
+        working-directory: upstream
+        env:
+          FORK_REPO: ${{ inputs.fork_repo }}
+          FORK_PUSH_TOKEN: ${{ secrets.fork_push_token }}
+          ALLOW_FORCE_SYNC: ${{ inputs.allow_fork_force_sync }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          source ../actions-repo/actions_helpers.sh
+
+          log_notice "Syncing $FORK_REPO main from $REPO main."
+
+          setup_git_auth x-access-token "$FORK_PUSH_TOKEN"
+
+          git remote add fork "https://github.com/${FORK_REPO}.git"
+
+          # Push this repo's tip to the fork's main. Non-force push relies on
+          # the server-side FF check; on rejection, optionally fall back to force.
+          if git push fork HEAD:main; then
+            log_notice "Fast-forward succeeded; pushed this repo's main to the fork's main."
+          elif [ "$ALLOW_FORCE_SYNC" = "true" ]; then
+            log_warning "Fast-forward not possible; force-pushing this repo's main to the fork's main."
+            git push --force fork HEAD:main
+          else
+            log_error "Fork main has diverged from this repo's main. Set allow_fork_force_sync: true to force-overwrite, or manually reconcile the fork."
+            exit 1
+          fi
+
+          log_notice "Sync complete."
