@@ -17,7 +17,7 @@ on:
         type: boolean
         default: false
     secrets:
-      fork_push_token:
+      fork_sync_token:
         description: >-
           PAT with Contents (Read and write) and Workflows (Read and write) on
           the fork (classic PATs: `repo` + `workflow` scopes). The Workflows
@@ -72,7 +72,7 @@ jobs:
         working-directory: upstream
         env:
           FORK_REPO: ${{ inputs.fork_repo }}
-          FORK_PUSH_TOKEN: ${{ secrets.fork_push_token }}
+          FORK_SYNC_TOKEN: ${{ secrets.fork_sync_token }}
           ALLOW_FORCE_SYNC: ${{ inputs.allow_fork_force_sync }}
           REPO: ${{ github.repository }}
         run: |
@@ -81,7 +81,7 @@ jobs:
 
           log_notice "Syncing $FORK_REPO main from $REPO main."
 
-          setup_git_auth x-access-token "$FORK_PUSH_TOKEN"
+          setup_git_auth x-access-token "$FORK_SYNC_TOKEN"
 
           git remote add fork "https://github.com/${FORK_REPO}.git"
 

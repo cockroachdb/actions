@@ -452,7 +452,7 @@ jobs:
       upstream_repo: cockroachdb/my-repo
       fork_repo: my-bot/my-repo-fork
     secrets:
-      fork_push_token: ${{ secrets.FORK_PUSH_TOKEN }}  # see Secrets below for required permissions
+      fork_sync_token: ${{ secrets.FORK_SYNC_TOKEN }}  # see Secrets below for required permissions
 ```
 
 **Inputs:**
@@ -467,14 +467,14 @@ jobs:
 
 | Name              | Required | Description                                      |
 | ----------------- | -------- | ------------------------------------------------ |
-| `fork_push_token` | Yes      | PAT with Contents (Read and write) and Workflows (Read and write) on the fork (classic PATs: `repo` + `workflow` scopes). The Workflows scope is required because a sync push may relay commits touching `.github/workflows/` that this repo has accumulated since the fork last synced. |
+| `fork_sync_token` | Yes      | PAT with Contents (Read and write) and Workflows (Read and write) on the fork (classic PATs: `repo` + `workflow` scopes). The Workflows scope is required because a sync push may relay commits touching `.github/workflows/` that this repo has accumulated since the fork last synced. |
 
 **Features:**
 
 - Compares `github.repository` against `upstream_repo` and exits early when they don't match
-- Pushes to the fork's `main` using `fork_push_token`; fetches this repo's `main` using the built-in `GITHUB_TOKEN`
+- Pushes to the fork's `main` using `fork_sync_token`; fetches this repo's `main` using the built-in `GITHUB_TOKEN`
 - By default (`allow_fork_force_sync: false`), aborts when the fork's `main` has diverged — protects against accidental data loss on forks used for real work
-- When `allow_fork_force_sync: true`, force-overwrites the fork's `main` on divergence, discarding any commits unique to the fork. Only safe when the fork's `main` is treated as a mirror, and the fork's `main` allows force-pushes by `fork_push_token` (e.g., no branch protection blocking it)
+- When `allow_fork_force_sync: true`, force-overwrites the fork's `main` on divergence, discarding any commits unique to the fork. Only safe when the fork's `main` is treated as a mirror, and the fork's `main` allows force-pushes by `fork_sync_token` (e.g., no branch protection blocking it)
 
 ## Development
 
