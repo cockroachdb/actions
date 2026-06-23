@@ -356,6 +356,70 @@ jobs:
 - Works by parsing the caller's workflow file from the event payload
 - Returns the exact ref specified in the workflow call (tag, branch, or SHA)
 
+### setup-private-go-modules
+
+Authenticates `go`/gazelle to fetch private `cockroachlabs/*` and `cockroachdb/*`
+Go modules in CI. Assumes a GCP service account via Workload Identity Federation,
+reads the shared go-deps GitHub App credentials from Secret Manager, mints a
+short-lived installation token per org, and configures git `insteadOf` rewrites
+(and optionally `GOPRIVATE`) so module fetches authenticate against the private
+repos.
+
+Pass a single `repositories` list of `owner/repo` entries; the org is derived
+from each entry and a token is minted per org. Use this to replace the
+per-workflow WIF + `gcloud` + token-mint + `git config` boilerplate. Run it once
+before any `go build`/`go test`/`make generate` step that needs private modules.
+
+**Usage:**
+
+```yaml
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    # Required for the Workload Identity Federation auth step.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - uses: cockroachdb/actions/setup-private-go-modules@v0
+        with:
+          repositories: |
+            cockroachlabs/<repo>
+            cockroachdb/<repo>
+      - run: go build -v ./...
+```
+
+**Inputs:**
+
+| Name                         | Default                          | Description                                                                                                            |
+| ---------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `repositories`               | _(required)_                     | Comma- and/or newline-separated `owner/repo` entries, e.g. `cockroachlabs/<repo>,cockroachdb/<repo>`. The org is derived from each entry (supported: `cockroachlabs`, `cockroachdb`). Drives the per-org token scope, git rewrites, and `GOPRIVATE`. |
+| `workload-identity-provider` | _(shared go-deps-ci provider)_   | Full resource name of the WIF provider to authenticate with. Override only for a non-default pool.                    |
+| `service-account`            | _(shared go-deps reader SA)_     | Email of the GCP service account to impersonate. Override only for a non-default SA.                                  |
+| `secrets-project`            | `crl-github-actions`             | GCP project holding the go-deps App credential secrets.                                                              |
+| `app-id-secret`              | `go-deps-github-app-id`          | Secret Manager secret name holding the App ID.                                                                       |
+| `app-private-key-secret`     | `go-deps-github-app-private-key` | Secret Manager secret name holding the App private key (PEM).                                                         |
+| `configure-goprivate`        | `true`                           | When `true`, set `GOPRIVATE` for the listed repos (merging with any existing value). Set `false` if the caller manages `GOPRIVATE` itself (e.g. via `go env -w`). |
+
+**Outputs:**
+
+| Name                  | Description                                                                |
+| --------------------- | ------------------------------------------------------------------------- |
+| `cockroachlabs-token` | Installation token for the cockroachlabs org (empty if none requested).   |
+| `cockroachdb-token`   | Installation token for the cockroachdb org (empty if none requested).     |
+
+**Required permissions:**
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+```
+
 ## Workflows
 
 ### create-release-pr

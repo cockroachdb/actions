@@ -1,0 +1,130 @@
+name: Setup private Go module auth
+description: >
+  Authenticate `go`/gazelle to fetch private cockroachlabs/* and cockroachdb/*
+  Go modules in CI. Assumes a GCP service account via Workload Identity
+  Federation, reads the shared go-deps GitHub App credentials from Secret
+  Manager, mints a short-lived installation token per org, and configures git
+  (and optionally GOPRIVATE) so module fetches authenticate against the private
+  repos.
+
+  Pass a single `repositories` list of `owner/repo` entries; the org is derived
+  from each entry. A GitHub App installation token is scoped to a single org's
+  installation, so one token is minted per org. The App must be installed on
+  each org you reference.
+
+  The calling job must request `permissions: id-token: write` (composite actions
+  cannot set permissions themselves).
+
+inputs:
+  workload-identity-provider:
+    description: >
+      Full resource name of the Workload Identity Federation provider to
+      authenticate with. Defaults to the shared go-deps-ci provider. Access is
+      gated by that provider's attribute_condition + sa_mapping (the repo must be
+      granted in crl-infrastructure), not by this value.
+    default: projects/677305473380/locations/global/workloadIdentityPools/go-deps-ci/providers/go-deps-ci
+  service-account:
+    description: >
+      Email of the GCP service account to impersonate. Defaults to the shared
+      go-deps reader SA.
+    default: go-deps-reader@crl-github-actions.iam.gserviceaccount.com
+  repositories:
+    description: >
+      Comma- and/or newline-separated list of private repos to fetch, as
+      `owner/repo` entries, e.g. "cockroachlabs/<repo>,cockroachdb/<repo>". The
+      org is derived from each entry; supported orgs are cockroachlabs and
+      cockroachdb. Drives the per-org App token scope, the git insteadOf
+      rewrites, and GOPRIVATE.
+    required: true
+  secrets-project:
+    description: GCP project holding the go-deps App credential secrets.
+    default: crl-github-actions
+  app-id-secret:
+    description: Secret Manager secret name holding the App ID.
+    default: go-deps-github-app-id
+  app-private-key-secret:
+    description: Secret Manager secret name holding the App private key (PEM).
+    default: go-deps-github-app-private-key
+  configure-goprivate:
+    description: >
+      When "true", set GOPRIVATE for the listed repos (merging with any existing
+      GOPRIVATE value). Set "false" if the caller manages GOPRIVATE itself
+      (e.g. via `go env -w` in a generate script).
+    default: "true"
+
+outputs:
+  cockroachlabs-token:
+    description: >
+      The minted installation token for the cockroachlabs org (empty if no
+      cockroachlabs repos were requested), in case the caller needs it for
+      additional steps (e.g. authenticated `gh` calls).
+    value: ${{ steps.token-cockroachlabs.outputs.token }}
+  cockroachdb-token:
+    description: >
+      The minted installation token for the cockroachdb org (empty if no
+      cockroachdb repos were requested).
+    value: ${{ steps.token-cockroachdb.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Authenticate to GCP (Workload Identity Federation)
+      # Pinned to v2.1.13.
+      uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+      with:
+        project_id: ${{ inputs.secrets-project }}
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+
+    - name: Fetch go-deps GitHub App credentials
+      id: creds
+      # Reads the secrets via the GCP API using the credentials from the auth
+      # step above (no gcloud CLI needed) and registers the values with
+      # ::add-mask:: automatically. Pinned to v2.2.5.
+      uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5
+      with:
+        secrets: |-
+          app-id:${{ inputs.secrets-project }}/${{ inputs.app-id-secret }}
+          private-key:${{ inputs.secrets-project }}/${{ inputs.app-private-key-secret }}
+
+    - name: Group requested repos by org
+      id: parse
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/parse-repositories.sh"
+      env:
+        REPOSITORIES: ${{ inputs.repositories }}
+
+    # One token per org. A GitHub App installation token is scoped to a single
+    # org's installation, and a composite action cannot loop `uses:` steps, so
+    # there is one step per supported org, each gated on whether the caller
+    # requested any repos there. Pinned to v3.2.0. Third-party actions must be
+    # pinned to a full commit SHA to guarantee immutability.
+    - name: Mint GitHub App installation token (cockroachlabs)
+      id: token-cockroachlabs
+      if: ${{ steps.parse.outputs.cockroachlabs != '' }}
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+      with:
+        app-id: ${{ steps.creds.outputs.app-id }}
+        private-key: ${{ steps.creds.outputs.private-key }}
+        owner: cockroachlabs
+        repositories: ${{ steps.parse.outputs.cockroachlabs }}
+
+    - name: Mint GitHub App installation token (cockroachdb)
+      id: token-cockroachdb
+      if: ${{ steps.parse.outputs.cockroachdb != '' }}
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+      with:
+        app-id: ${{ steps.creds.outputs.app-id }}
+        private-key: ${{ steps.creds.outputs.private-key }}
+        owner: cockroachdb
+        repositories: ${{ steps.parse.outputs.cockroachdb }}
+
+    - name: Configure git/Go for private modules
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/configure-git-auth.sh"
+      env:
+        COCKROACHLABS_TOKEN: ${{ steps.token-cockroachlabs.outputs.token }}
+        COCKROACHLABS_REPOSITORIES: ${{ steps.parse.outputs.cockroachlabs }}
+        COCKROACHDB_TOKEN: ${{ steps.token-cockroachdb.outputs.token }}
+        COCKROACHDB_REPOSITORIES: ${{ steps.parse.outputs.cockroachdb }}
+        CONFIGURE_GOPRIVATE: ${{ inputs.configure-goprivate }}
