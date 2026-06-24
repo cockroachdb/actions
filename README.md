@@ -409,8 +409,8 @@ jobs:
 
 | Name                  | Description                                                                |
 | --------------------- | ------------------------------------------------------------------------- |
-| `cockroachlabs-token` | Installation token for the cockroachlabs org (empty if none requested).   |
-| `cockroachdb-token`   | Installation token for the cockroachdb org (empty if none requested).     |
+| `cockroachlabs_token` | Installation token for the cockroachlabs org (empty if none requested).   |
+| `cockroachdb_token`   | Installation token for the cockroachdb org (empty if none requested).     |
 
 **Required permissions:**
 

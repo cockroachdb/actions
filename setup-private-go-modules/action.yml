@@ -53,13 +53,13 @@ inputs:
     default: "true"
 
 outputs:
-  cockroachlabs-token:
+  cockroachlabs_token:
     description: >
       The minted installation token for the cockroachlabs org (empty if no
       cockroachlabs repos were requested), in case the caller needs it for
       additional steps (e.g. authenticated `gh` calls).
     value: ${{ steps.token-cockroachlabs.outputs.token }}
-  cockroachdb-token:
+  cockroachdb_token:
     description: >
       The minted installation token for the cockroachdb org (empty if no
       cockroachdb repos were requested).

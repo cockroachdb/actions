@@ -12,6 +12,12 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ### Added
 
+- `setup-private-go-modules` action: authenticate `go`/gazelle to fetch private
+  `cockroachlabs/*` and `cockroachdb/*` Go modules in CI. Authenticates to GCP
+  via Workload Identity Federation, reads the shared go-deps GitHub App
+  credentials from Secret Manager, mints a short-lived installation token per
+  org, and configures git insteadOf rewrites (and optionally `GOPRIVATE`).
+
 - `sync-fork` reusable workflow: runs in the upstream repo and fast-forwards a
   fork's `main` from this repo's `main`. Aborts when the fork has diverged
   unless `allow_fork_force_sync` is set, in which case the fork is
