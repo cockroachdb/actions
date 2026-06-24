@@ -8,6 +8,8 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-24
+
 ### Added
 
 - `sync-fork` reusable workflow: runs in the upstream repo and fast-forwards a
