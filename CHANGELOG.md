@@ -8,7 +8,15 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-06-24
+## [0.7.1] - 2026-07-09
+
+### Fixed
+
+- `setup-private-go-modules`: fixed the action failing on macOS runners with
+  `declare: -A: invalid option`. macOS ships bash 3.2, which has no
+  associative arrays; repository parsing now uses plain indexed arrays.
+
+## [0.7.0] - 2026-06-24
 
 ### Added
 
@@ -17,6 +25,10 @@ Breaking changes are prefixed with "Breaking Change: ".
   via Workload Identity Federation, reads the shared go-deps GitHub App
   credentials from Secret Manager, mints a short-lived installation token per
   org, and configures git insteadOf rewrites (and optionally `GOPRIVATE`).
+
+## [0.6.0] - 2026-06-24
+
+### Added
 
 - `sync-fork` reusable workflow: runs in the upstream repo and fast-forwards a
   fork's `main` from this repo's `main`. Aborts when the fork has diverged

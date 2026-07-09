@@ -14,9 +14,11 @@ set -euo pipefail
 # steps in action.yml (one create-github-app-token step each).
 supported=(cockroachlabs cockroachdb)
 
-declare -A repos_by_org=()
-for org in "${supported[@]}"; do
-  repos_by_org["${org}"]=""
+# Indexed array parallel to `supported` (macOS runners ship bash 3.2, which
+# has no associative arrays).
+repos_by_org=()
+for i in "${!supported[@]}"; do
+  repos_by_org[i]=""
 done
 
 # Accept comma- and/or newline-separated entries.
@@ -33,16 +35,23 @@ while IFS= read -r entry; do
     echo "::error::Invalid repository '${entry}'; expected 'owner/repo'." >&2
     exit 1
   fi
-  if [[ -z "${repos_by_org[${owner}]+x}" ]]; then
+  org_index=""
+  for i in "${!supported[@]}"; do
+    if [[ "${supported[i]}" == "${owner}" ]]; then
+      org_index="${i}"
+      break
+    fi
+  done
+  if [[ -z "${org_index}" ]]; then
     echo "::error::Unsupported org '${owner}'. Supported orgs: ${supported[*]}." >&2
     exit 1
   fi
 
-  repos_by_org["${owner}"]="${repos_by_org[${owner}]:+${repos_by_org[${owner}]},}${repo}"
+  repos_by_org[org_index]="${repos_by_org[org_index]:+${repos_by_org[org_index]},}${repo}"
 done <<< "${entries}"
 
 {
-  for org in "${supported[@]}"; do
-    echo "${org}=${repos_by_org[${org}]}"
+  for i in "${!supported[@]}"; do
+    echo "${supported[i]}=${repos_by_org[i]}"
   done
 } >> "${GITHUB_OUTPUT}"
