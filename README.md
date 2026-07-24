@@ -395,15 +395,15 @@ jobs:
 
 **Inputs:**
 
-| Name                         | Default                          | Description                                                                                                            |
-| ---------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `repositories`               | _(required)_                     | Comma- and/or newline-separated `owner/repo` entries, e.g. `cockroachlabs/<repo>,cockroachdb/<repo>`. The org is derived from each entry (supported: `cockroachlabs`, `cockroachdb`). Drives the per-org token scope, git rewrites, and `GOPRIVATE`. |
-| `workload-identity-provider` | _(shared go-deps-ci provider)_   | Full resource name of the WIF provider to authenticate with. Override only for a non-default pool.                    |
-| `service-account`            | _(shared go-deps reader SA)_     | Email of the GCP service account to impersonate. Override only for a non-default SA.                                  |
-| `secrets-project`            | `crl-github-actions`             | GCP project holding the go-deps App credential secrets.                                                              |
-| `app-id-secret`              | `go-deps-github-app-id`          | Secret Manager secret name holding the App ID.                                                                       |
-| `app-private-key-secret`     | `go-deps-github-app-private-key` | Secret Manager secret name holding the App private key (PEM).                                                         |
-| `configure-goprivate`        | `true`                           | When `true`, set `GOPRIVATE` for the listed repos (merging with any existing value). Set `false` if the caller manages `GOPRIVATE` itself (e.g. via `go env -w`). |
+| Name                         | Default                             | Description                                                                                                            |
+| ---------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `repositories`               | _(required)_                        | Comma- and/or newline-separated `owner/repo` entries, e.g. `cockroachlabs/<repo>,cockroachdb/<repo>`. The org is derived from each entry (supported: `cockroachlabs`, `cockroachdb`). Drives the per-org token scope, git rewrites, and `GOPRIVATE`. |
+| `workload-identity-provider` | _(shared go-deps-ci provider)_      | Full resource name of the WIF provider to authenticate with. Override only for a non-default pool.                    |
+| `service-account`            | _(shared go-deps reader SA)_        | Email of the GCP service account to impersonate. Override only for a non-default SA.                                  |
+| `secrets-project`            | `crl-github-actions`                | GCP project holding the go-deps App credential secrets.                                                              |
+| `client-id-secret`           | `go-deps-github-app-id-v2`          | Secret Manager secret name holding the App Client ID.                                                                |
+| `app-private-key-secret`     | `go-deps-github-app-private-key-v2` | Secret Manager secret name holding the App private key (PEM).                                                         |
+| `configure-goprivate`        | `true`                              | When `true`, set `GOPRIVATE` for the listed repos (merging with any existing value). Set `false` if the caller manages `GOPRIVATE` itself (e.g. via `go env -w`). |
 
 **Outputs:**
 
