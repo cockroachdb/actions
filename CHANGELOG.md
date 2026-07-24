@@ -8,6 +8,14 @@ Breaking changes are prefixed with "Breaking Change: ".
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-24
+
+### Changed
+
+- Breaking Change: `setup-private-go-modules`: renamed the `app-id-secret` input
+  to `client-id-secret` and switched the default credential secrets to the
+  `-v2` variants (GitHub App Client ID auth).
+
 ## [0.7.1] - 2026-07-09
 
 ### Fixed

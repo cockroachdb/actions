@@ -39,12 +39,12 @@ inputs:
   secrets-project:
     description: GCP project holding the go-deps App credential secrets.
     default: crl-github-actions
-  app-id-secret:
-    description: Secret Manager secret name holding the App ID.
-    default: go-deps-github-app-id
+  client-id-secret:
+    description: Secret Manager secret name holding the App Client ID.
+    default: go-deps-github-app-id-v2
   app-private-key-secret:
     description: Secret Manager secret name holding the App private key (PEM).
-    default: go-deps-github-app-private-key
+    default: go-deps-github-app-private-key-v2
   configure-goprivate:
     description: >
       When "true", set GOPRIVATE for the listed repos (merging with any existing
@@ -84,7 +84,7 @@ runs:
       uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5
       with:
         secrets: |-
-          app-id:${{ inputs.secrets-project }}/${{ inputs.app-id-secret }}
+          client-id:${{ inputs.secrets-project }}/${{ inputs.client-id-secret }}
           private-key:${{ inputs.secrets-project }}/${{ inputs.app-private-key-secret }}
 
     - name: Group requested repos by org
@@ -104,7 +104,7 @@ runs:
       if: ${{ steps.parse.outputs.cockroachlabs != '' }}
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
       with:
-        app-id: ${{ steps.creds.outputs.app-id }}
+        client-id: ${{ steps.creds.outputs.client-id }}
         private-key: ${{ steps.creds.outputs.private-key }}
         owner: cockroachlabs
         repositories: ${{ steps.parse.outputs.cockroachlabs }}
@@ -114,7 +114,7 @@ runs:
       if: ${{ steps.parse.outputs.cockroachdb != '' }}
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
       with:
-        app-id: ${{ steps.creds.outputs.app-id }}
+        client-id: ${{ steps.creds.outputs.client-id }}
         private-key: ${{ steps.creds.outputs.private-key }}
         owner: cockroachdb
         repositories: ${{ steps.parse.outputs.cockroachdb }}
